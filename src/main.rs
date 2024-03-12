@@ -1,4 +1,7 @@
-use chrono::Utc;
+use anyhow::anyhow;
+use anyhow::Result;
+use chrono::Duration;
+use chrono::{Local, Utc};
 use sqlx::SqlitePool;
 use std::{env, error::Error, sync::Arc};
 use teloxide::{
@@ -8,6 +11,7 @@ use teloxide::{
     types::{InlineKeyboardButton, InlineKeyboardMarkup, Me},
     utils::command::BotCommands,
 };
+use tokio::time::sleep;
 
 /// These commands are supported:
 #[derive(BotCommands)]
@@ -17,30 +21,6 @@ enum Command {
     Help,
     /// Start
     Start,
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    pretty_env_logger::init();
-    log::info!("Starting buttons bot...");
-
-    let bot = Bot::from_env();
-    let pool = Arc::new(SqlitePool::connect(&env::var("DATABASE_URL")?).await?);
-
-    let handler = dptree::entry()
-        .branch(Update::filter_message().endpoint(message_handler))
-        .branch(
-            Update::filter_callback_query()
-                .endpoint(move |bot, q| callback_handler(pool.clone(), bot, q)),
-        );
-
-    Dispatcher::builder(bot, handler)
-        .enable_ctrlc_handler()
-        .build()
-        .dispatch()
-        .await;
-
-    Ok(())
 }
 
 /// Creates a keyboard made by buttons in a big column.
@@ -99,11 +79,6 @@ async fn message_handler(
     Ok(())
 }
 
-/// When it receives a callback from a button it edits the message with all
-/// those buttons writing a text with the selected Debian version.
-///
-/// **IMPORTANT**: do not send privacy-sensitive data this way!!!
-/// Anyone can read data stored in the callback button.
 async fn callback_handler(
     pool: Arc<SqlitePool>,
     bot: Bot,
@@ -116,7 +91,7 @@ async fn callback_handler(
                     let now = Utc::now();
                     let timestamp = now.timestamp();
 
-                    sqlx::query("INSERT INTO subscriptions (chat_id, subscribed, ) VALUES (?, ?)")
+                    sqlx::query("INSERT INTO subscriptions (chat_id, subscribed) VALUES (?, ?)")
                         .bind(chat_id.to_string())
                         .bind(true)
                         .bind(timestamp)
@@ -147,6 +122,71 @@ async fn callback_handler(
             log::info!("You chose: {}", chosen_action);
         }
     }
+
+    Ok(())
+}
+
+async fn send_daily_message(bot: Arc<Bot>) -> anyhow::Result<()> {
+    loop {
+        let duration = duration_until(5, 0)?; // 8:00 Moscow time is 5:00 UTC
+        sleep(duration).await;
+
+        //TODO logic to send daily message
+    }
+}
+
+fn duration_until(hour: u32, min: u32) -> Result<std::time::Duration, anyhow::Error> {
+    let now = Local::now().naive_utc();
+
+    let eight_am = now
+        .date()
+        .and_hms_opt(hour, min, 0)
+        .ok_or(anyhow!("Invalid time"))?;
+
+    let res_duration = if now < eight_am {
+        eight_am - now
+    } else {
+        let hours24_delta = Duration::try_hours(24).ok_or(anyhow!("Invalid time"))?;
+        hours24_delta - (now - eight_am)
+    };
+
+    Ok(res_duration.to_std()?)
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    pretty_env_logger::init();
+    log::info!("Starting buttons bot...");
+
+    let bot = Arc::new(Bot::from_env());
+    let pool = Arc::new(SqlitePool::connect(&env::var("DATABASE_URL")?).await?);
+
+    let send_bot = bot.clone();
+    let send_daily_message_task = tokio::spawn(async move {
+        loop {
+            match send_daily_message(send_bot.clone()).await {
+                Ok(_) => (),
+                Err(e) => log::error!("Failed to send daily message: {}", e),
+            }
+        }
+    });
+
+    let receiver_pool = pool.clone();
+    let handler = dptree::entry()
+        .branch(Update::filter_message().endpoint(message_handler))
+        .branch(
+            Update::filter_callback_query().endpoint(move |bot: Bot, q| {
+                callback_handler(receiver_pool.clone(), bot.clone(), q)
+            }),
+        );
+
+    Dispatcher::builder(bot.clone(), handler)
+        .enable_ctrlc_handler()
+        .build()
+        .dispatch()
+        .await;
+
+    send_daily_message_task.await?;
 
     Ok(())
 }
