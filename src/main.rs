@@ -11,6 +11,7 @@ use teloxide::{
     types::{InlineKeyboardButton, InlineKeyboardMarkup, Me},
     utils::command::BotCommands,
 };
+use tokio::signal::unix::{signal, SignalKind};
 use tokio::time::sleep;
 
 /// These commands are supported:
@@ -126,13 +127,24 @@ async fn callback_handler(
     Ok(())
 }
 
-async fn send_daily_message(bot: Arc<Bot>) -> anyhow::Result<()> {
+async fn send_daily_message(
+    bot: Arc<Bot>,
+    mut shutdown_signal: tokio::sync::mpsc::Receiver<()>,
+) -> anyhow::Result<()> {
     loop {
         let duration = duration_until(5, 0)?; // 8:00 Moscow time is 5:00 UTC
-        sleep(duration).await;
-
-        //TODO logic to send daily message
+        tokio::select! {
+            _ = sleep(duration) => {
+                //TODO logic to send daily message
+            }
+            _ = shutdown_signal.recv() => {
+                println!("Shutting down daily message task");
+                break;
+            }
+        }
     }
+
+    Ok(())
 }
 
 fn duration_until(hour: u32, min: u32) -> Result<std::time::Duration, anyhow::Error> {
@@ -162,12 +174,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let pool = Arc::new(SqlitePool::connect(&env::var("DATABASE_URL")?).await?);
 
     let send_bot = bot.clone();
+    let (shutdown_send, shutdown_recv) = tokio::sync::mpsc::channel(1);
+
     let send_daily_message_task = tokio::spawn(async move {
-        loop {
-            match send_daily_message(send_bot.clone()).await {
-                Ok(_) => (),
-                Err(e) => log::error!("Failed to send daily message: {}", e),
-            }
+        match send_daily_message(send_bot.clone(), shutdown_recv).await {
+            Ok(_) => (),
+            Err(e) => log::error!("Failed to send daily message: {}", e),
         }
     });
 
@@ -185,6 +197,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .build()
         .dispatch()
         .await;
+
+    let mut stream = signal(SignalKind::interrupt())?;
+    tokio::spawn(async move {
+        stream.recv().await;
+        let _ = shutdown_send.send(());
+    });
 
     send_daily_message_task.await?;
 
