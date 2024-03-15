@@ -2,7 +2,9 @@ use anyhow::anyhow;
 use anyhow::Result;
 use chrono::Duration;
 use chrono::{Local, Utc};
-use sqlx::SqlitePool;
+use log::info;
+use log::warn;
+use sqlx::{migrate, SqlitePool};
 use std::{env, error::Error, sync::Arc};
 use teloxide::{
     dispatching::dialogue::GetChatId,
@@ -12,6 +14,7 @@ use teloxide::{
     utils::command::BotCommands,
 };
 use tokio::signal::unix::{signal, SignalKind};
+use tokio::time::interval;
 use tokio::time::{interval_at, Instant};
 
 /// These commands are supported:
@@ -87,14 +90,15 @@ async fn callback_handler(
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(chosen_action) = &q.data {
         if let Some(chat_id) = q.chat_id() {
+            let now = Utc::now();
+            let timestamp = now.timestamp();
+
             match chosen_action.as_str() {
                 "Подписаться" => {
-                    let now = Utc::now();
-                    let timestamp = now.timestamp();
-
-                    sqlx::query("INSERT INTO subscriptions (chat_id, subscribed) VALUES (?, ?)")
+                    sqlx::query("INSERT INTO subscription (chat_id, is_enabled, created_at, updated_at) VALUES (?, ?, ?, ?)")
                         .bind(chat_id.to_string())
-                        .bind(true)
+                        .bind(1)
+                        .bind(timestamp)
                         .bind(timestamp)
                         .execute(pool.as_ref())
                         .await?;
@@ -113,14 +117,26 @@ async fn callback_handler(
                     }
                 }
                 "Отписаться" => {
-                    todo!("implement unsubscribe");
+                    sqlx::query(
+                        "UPDATE subscription SET is_enabled = 0, updated_at = ? WHERE chat_id = ?",
+                    )
+                    .bind(timestamp)
+                    .bind(chat_id.to_string())
+                    .execute(pool.as_ref())
+                    .await?;
+
+                    let text = "Вы отписались от рассылки";
+
+                    bot.answer_callback_query(q.id).await?;
+
+                    if let Some(Message { id, chat, .. }) = q.message {
+                        bot.edit_message_text(chat.id, id, text).await?;
+                    }
                 }
                 _ => {
-                    log::warn!("Unknown action: {}", chosen_action);
+                    warn!("Unknown action: {}", chosen_action);
                 }
             }
-
-            log::info!("You chose: {}", chosen_action);
         }
     }
 
@@ -128,24 +144,35 @@ async fn callback_handler(
 }
 
 async fn send_daily_message(
-    bot: Arc<Bot>,
+    bot: Bot,
+    pool: Arc<SqlitePool>,
     mut shutdown_signal: tokio::sync::mpsc::Receiver<()>,
 ) -> anyhow::Result<()> {
     let now = Instant::now();
     let duration = duration_until(5, 0)?; // 8:00 Moscow time is 5:00 UTC
     let start_time = now + duration;
-    let mut interval = interval_at(
-        start_time,
-        Duration::try_days(1)
-            .ok_or(anyhow!("Invalid time"))?
-            .to_std()?,
-    );
+    // let mut interval = interval_at(
+    //     start_time,
+    //     Duration::try_days(1)
+    //         .ok_or(anyhow!("Invalid time"))?
+    //         .to_std()?,
+    // );
+    let mut interval = interval(Duration::try_seconds(5).ok_or(anyhow!("123"))?.to_std()?);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
             _ = interval.tick() => {
-                //TODO logic to send daily message
+                let chat_ids = sqlx::query_as::<_, (i64,)>("SELECT chat_id FROM subscription WHERE is_enabled = 1")
+                    .fetch_all(pool.as_ref())
+                    .await?
+                    .into_iter()
+                    .map(|(chat_id,)| chat_id)
+                    .collect::<Vec<i64>>();
+
+                for chat_id in chat_ids {
+                    bot.send_message(ChatId(chat_id), "Сутта дня").await?;
+                }
             }
             _ = shutdown_signal.recv() => {
                 println!("Shutting down daily message task");
@@ -175,19 +202,32 @@ fn duration_until(hour: u32, min: u32) -> Result<std::time::Duration, anyhow::Er
     Ok(res_duration.to_std()?)
 }
 
+async fn migrate_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    sqlx::migrate!("./db/migrations").run(pool).await?;
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    // TODO anyhow::Result
     pretty_env_logger::init();
-    log::info!("Starting buttons bot...");
 
-    let bot = Arc::new(Bot::from_env());
     let pool = Arc::new(SqlitePool::connect(&env::var("DATABASE_URL")?).await?);
 
+    info!("Migrating database...");
+    migrate_db(pool.as_ref()).await?;
+    info!("Database migrated");
+
+    info!("Starting buttons bot...");
+    let bot = Bot::from_env();
+
     let send_bot = bot.clone();
+    let send_pool = pool.clone();
     let (shutdown_send, shutdown_recv) = tokio::sync::mpsc::channel(1);
 
     let send_daily_message_task = tokio::spawn(async move {
-        match send_daily_message(send_bot.clone(), shutdown_recv).await {
+        match send_daily_message(send_bot.clone(), send_pool.clone(), shutdown_recv).await {
             Ok(_) => (),
             Err(e) => log::error!("Failed to send daily message: {}", e),
         }
