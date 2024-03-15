@@ -12,7 +12,7 @@ use teloxide::{
     utils::command::BotCommands,
 };
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::time::sleep;
+use tokio::time::{interval_at, Instant};
 
 /// These commands are supported:
 #[derive(BotCommands)]
@@ -131,10 +131,20 @@ async fn send_daily_message(
     bot: Arc<Bot>,
     mut shutdown_signal: tokio::sync::mpsc::Receiver<()>,
 ) -> anyhow::Result<()> {
+    let now = Instant::now();
+    let duration = duration_until(5, 0)?; // 8:00 Moscow time is 5:00 UTC
+    let start_time = now + duration;
+    let mut interval = interval_at(
+        start_time,
+        Duration::try_days(1)
+            .ok_or(anyhow!("Invalid time"))?
+            .to_std()?,
+    );
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
-        let duration = duration_until(5, 0)?; // 8:00 Moscow time is 5:00 UTC
         tokio::select! {
-            _ = sleep(duration) => {
+            _ = interval.tick() => {
                 //TODO logic to send daily message
             }
             _ = shutdown_signal.recv() => {
