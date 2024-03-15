@@ -4,8 +4,12 @@ use chrono::Duration;
 use chrono::{Local, Utc};
 use log::info;
 use log::warn;
-use sqlx::{migrate, SqlitePool};
+use rand::seq::IteratorRandom;
+use sqlx::SqlitePool;
+use std::fs;
+use std::path::Path;
 use std::{env, error::Error, sync::Arc};
+use teloxide::types::ParseMode;
 use teloxide::{
     dispatching::dialogue::GetChatId,
     payloads::SendMessageSetters,
@@ -15,7 +19,7 @@ use teloxide::{
 };
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::time::interval;
-use tokio::time::{interval_at, Instant};
+use tokio::time::{interval_at, Instant}; // Import the Iterator trait from the rand::seq module
 
 /// These commands are supported:
 #[derive(BotCommands)]
@@ -95,6 +99,9 @@ async fn callback_handler(
 
             match chosen_action.as_str() {
                 "Подписаться" => {
+                    // TODO check if chat_id already exists and is_enabled = 1
+                    // if so, return, else insert, else if is_enabled = 0, update to 1
+
                     sqlx::query("INSERT INTO subscription (chat_id, is_enabled, created_at, updated_at) VALUES (?, ?, ?, ?)")
                         .bind(chat_id.to_string())
                         .bind(1)
@@ -157,7 +164,7 @@ async fn send_daily_message(
     //         .ok_or(anyhow!("Invalid time"))?
     //         .to_std()?,
     // );
-    let mut interval = interval(Duration::try_seconds(5).ok_or(anyhow!("123"))?.to_std()?);
+    let mut interval = interval(Duration::try_seconds(15).ok_or(anyhow!("123"))?.to_std()?);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
@@ -171,7 +178,35 @@ async fn send_daily_message(
                     .collect::<Vec<i64>>();
 
                 for chat_id in chat_ids {
-                    bot.send_message(ChatId(chat_id), "Сутта дня").await?;
+                    let data_dir = Path::new("./data"); // TODO pass parameter
+
+                    let file = data_dir
+                        .read_dir()?
+                        .filter_map(|entry| entry.ok())
+                        .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
+                        .choose(&mut rand::thread_rng()) // Use the choose method on the iterator
+                        .ok_or(anyhow!("No files in data dir"))?;
+
+                    let texts = fs::read_to_string(file.path())?
+                        // .replace("_", "\\_") // TODO preprocess data source files, see https://core.telegram.org/bots/api#formatting-options
+                        // .replace("*", "\\*")
+                        // .replace("[", "\\[")
+                        // .replace("]", "\\]")
+                        // .replace("(", "\\(")
+                        // .replace(")", "\\)")
+                        // .replace("`", "\\`")
+                        // .replace("#", "\\#")
+                        // .replace(".", "\\.")
+                        // .replace("-", "\\-")
+                        .chars()
+                        .collect::<Vec<char>>()
+                        .chunks(4096) // TODO const
+                        .map(|chunk| chunk.iter().collect::<String>())
+                        .collect::<Vec<String>>();
+
+                    for text in texts {
+                        bot.send_message(ChatId(chat_id), text).parse_mode(ParseMode::Markdown).await?; // TODO enable v2
+                    }
                 }
             }
             _ = shutdown_signal.recv() => {
@@ -213,7 +248,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // TODO anyhow::Result
     pretty_env_logger::init();
 
-    let pool = Arc::new(SqlitePool::connect(&env::var("DATABASE_URL")?).await?);
+    let db_url = &env::var("DATABASE_URL")?;
+    let data_dir = &env::var("DATA_DIR")?;
+
+    let pool = Arc::new(SqlitePool::connect(db_url).await?);
 
     info!("Migrating database...");
     migrate_db(pool.as_ref()).await?;

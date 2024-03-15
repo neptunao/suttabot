@@ -1940,6 +1940,7 @@ dependencies = [
  "chrono",
  "log",
  "pretty_env_logger",
+ "rand",
  "sqlx",
  "teloxide",
  "tokio",

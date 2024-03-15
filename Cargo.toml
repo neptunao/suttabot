@@ -11,3 +11,4 @@ tokio = { version =  "1.29.*", features = ["rt-multi-thread", "macros"] }
 anyhow = "1.0.*"
 sqlx = { version = "0.7", features = [ "runtime-tokio", "sqlite" ] }
 chrono = "0.4.35"
+rand = "0.8.5"
