@@ -2,6 +2,7 @@ use anyhow::anyhow;
 use anyhow::Result;
 use chrono::Duration;
 use chrono::{Local, Utc};
+use log::debug;
 use log::info;
 use log::warn;
 use rand::seq::IteratorRandom;
@@ -18,7 +19,6 @@ use teloxide::{
     utils::command::BotCommands,
 };
 use tokio::signal::unix::{signal, SignalKind};
-use tokio::time::interval;
 use tokio::time::{interval_at, Instant};
 
 #[derive(BotCommands)]
@@ -27,6 +27,8 @@ enum Command {
     Help,
     Start,
 }
+
+mod dto;
 
 const TELEGRAM_TEXT_MAX_LENGTH: usize = 4096;
 
@@ -101,28 +103,64 @@ async fn callback_handler(
                     // TODO check if chat_id already exists and is_enabled = 1
                     // if so, return, else insert, else if is_enabled = 0, update to 1
 
-                    sqlx::query("INSERT INTO subscription (chat_id, is_enabled, created_at, updated_at) VALUES (?, ?, ?, ?)")
-                        .bind(chat_id.to_string())
-                        .bind(1)
-                        .bind(timestamp)
-                        .bind(timestamp)
-                        .execute(pool.as_ref())
-                        .await?;
+                    let existing_subscription = sqlx::query_as::<_, dto::SubscriptionDto>(
+                        "SELECT * FROM subscription WHERE chat_id = ?",
+                    )
+                    .bind(chat_id.to_string())
+                    .fetch_optional(pool.as_ref())
+                    .await?;
 
-                    let text =
-                        "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве";
+                    match existing_subscription {
+                        Some(subscription) => {
+                            if subscription.is_enabled == 1 {
+                                info!("Chat_id: {} already subscribed, doing nothing", chat_id);
 
-                    // Tell telegram that we've seen this query, to remove 🕑 icons from the
-                    // clients. You could also use `answer_callback_query`'s optional
-                    // parameters to tweak what happens on the client side.
-                    bot.answer_callback_query(q.id).await?;
+                                let text = "Вы уже подписаны на рассылку";
+                                answer_message_with_replace(&bot, q.id, q.message, text).await?;
 
-                    // Edit text of the message to which the buttons were attached
-                    if let Some(Message { id, chat, .. }) = q.message {
-                        bot.edit_message_text(chat.id, id, text).await?;
+                                return Ok(());
+                            }
+
+                            info!(
+                                "Updating subscription {} for chat_id: {}",
+                                subscription.id, chat_id
+                            );
+
+                            sqlx::query(
+                                    "UPDATE subscription SET is_enabled = 1, updated_at = ? WHERE id = ?",
+                                )
+                                .bind(timestamp)
+                                .bind(subscription.id)
+                                .execute(pool.as_ref())
+                                .await?;
+
+                            let text = "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве";
+                            answer_message_with_replace(&bot, q.id, q.message, text).await?;
+
+                            return Ok(());
+                        }
+                        None => {
+                            info!("Inserting new subscription for chat_id: {}", chat_id);
+
+                            sqlx::query("INSERT INTO subscription (chat_id, is_enabled, created_at, updated_at) VALUES (?, ?, ?, ?)")
+                                .bind(chat_id.to_string())
+                                .bind(1)
+                                .bind(timestamp)
+                                .bind(timestamp)
+                                .execute(pool.as_ref())
+                                .await?;
+
+                            let text = "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве";
+
+                            answer_message_with_replace(&bot, q.id, q.message, text).await?;
+
+                            return Ok(());
+                        }
                     }
                 }
                 "Отписаться" => {
+                    info!("Disabling subscription for chat_id: {}", chat_id);
+
                     sqlx::query(
                         "UPDATE subscription SET is_enabled = 0, updated_at = ? WHERE chat_id = ?",
                     )
@@ -133,17 +171,30 @@ async fn callback_handler(
 
                     let text = "Вы отписались от рассылки";
 
-                    bot.answer_callback_query(q.id).await?;
+                    answer_message_with_replace(&bot, q.id, q.message, text).await?;
 
-                    if let Some(Message { id, chat, .. }) = q.message {
-                        bot.edit_message_text(chat.id, id, text).await?;
-                    }
+                    return Ok(());
                 }
                 _ => {
                     warn!("Unknown action: {}", chosen_action);
                 }
             }
         }
+    }
+
+    Ok(())
+}
+
+async fn answer_message_with_replace(
+    bot: &Bot,
+    callback_query_id: String,
+    message: Option<Message>,
+    text: &str,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    bot.answer_callback_query(callback_query_id).await?;
+
+    if let Some(Message { id, chat, .. }) = message {
+        bot.edit_message_text(chat.id, id, text).await?;
     }
 
     Ok(())
@@ -156,20 +207,38 @@ async fn send_daily_message(
     mut shutdown_signal: tokio::sync::mpsc::Receiver<()>,
 ) -> anyhow::Result<()> {
     let now = Instant::now();
+    // TODO env var for daily message time
     let duration = duration_until(5, 0)?; // 8:00 Moscow time is 5:00 UTC
     let start_time = now + duration;
-    // let mut interval = interval_at(
-    //     start_time,
-    //     Duration::try_days(1)
-    //         .ok_or(anyhow!("Invalid time"))?
-    //         .to_std()?,
-    // );
-    let mut interval = interval(Duration::try_seconds(15).ok_or(anyhow!("123"))?.to_std()?);
+    let mut interval = interval_at(
+        start_time,
+        Duration::try_days(1)
+            .ok_or(anyhow!("Invalid time"))?
+            .to_std()?,
+    );
+    let mut interval =
+        tokio::time::interval(Duration::try_seconds(60).ok_or(anyhow!("123"))?.to_std()?);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    info!("Reading files from data dir");
+    let files = data_dir
+        .read_dir()?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
+        .collect::<Vec<_>>();
+
+    info!(
+        "starting daily message task with interval: {:?} and {} files",
+        interval,
+        files.len()
+    );
 
     loop {
         tokio::select! {
             _ = interval.tick() => {
+                info!("Sending daily message");
+                debug!("Querying chat_ids");
+
                 let chat_ids = sqlx::query_as::<_, (i64,)>("SELECT chat_id FROM subscription WHERE is_enabled = 1")
                     .fetch_all(pool.as_ref())
                     .await?
@@ -177,11 +246,11 @@ async fn send_daily_message(
                     .map(|(chat_id,)| chat_id)
                     .collect::<Vec<i64>>();
 
+                debug!("Got {} chat_ids", chat_ids.len());
+
                 for chat_id in chat_ids {
-                    let file = data_dir
-                        .read_dir()?
-                        .filter_map(|entry| entry.ok())
-                        .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
+                    let file = files
+                        .iter()
                         .choose(&mut rand::thread_rng()) // Use the choose method on the iterator
                         .ok_or(anyhow!("No files in data dir"))?;
 
@@ -192,8 +261,13 @@ async fn send_daily_message(
                         .map(|chunk| chunk.iter().collect::<String>())
                         .collect::<Vec<String>>();
 
+                    info!("Sending daily message to chat_id: {}, filename: {}", chat_id, file.file_name().to_string_lossy());
+
                     for text in texts {
-                        bot.send_message(ChatId(chat_id), text).parse_mode(ParseMode::MarkdownV2).await?;
+                        let send_result = bot.send_message(ChatId(chat_id), text).parse_mode(ParseMode::MarkdownV2).await;
+                        if let Err(e) = send_result {
+                            log::error!("Failed to send message to chat_id: {}, error: {}", chat_id, e);
+                        }
                     }
                 }
             }
