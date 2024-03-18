@@ -19,17 +19,16 @@ use teloxide::{
 };
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::time::interval;
-use tokio::time::{interval_at, Instant}; // Import the Iterator trait from the rand::seq module
+use tokio::time::{interval_at, Instant};
 
-/// These commands are supported:
 #[derive(BotCommands)]
 #[command(rename_rule = "lowercase")]
 enum Command {
-    /// Display this text
     Help,
-    /// Start
     Start,
 }
+
+const TELEGRAM_TEXT_MAX_LENGTH: usize = 4096;
 
 /// Creates a keyboard made by buttons in a big column.
 fn make_keyboard() -> InlineKeyboardMarkup {
@@ -153,6 +152,7 @@ async fn callback_handler(
 async fn send_daily_message(
     bot: Bot,
     pool: Arc<SqlitePool>,
+    data_dir: &Path,
     mut shutdown_signal: tokio::sync::mpsc::Receiver<()>,
 ) -> anyhow::Result<()> {
     let now = Instant::now();
@@ -178,8 +178,6 @@ async fn send_daily_message(
                     .collect::<Vec<i64>>();
 
                 for chat_id in chat_ids {
-                    let data_dir = Path::new("./data"); // TODO pass parameter
-
                     let file = data_dir
                         .read_dir()?
                         .filter_map(|entry| entry.ok())
@@ -188,24 +186,14 @@ async fn send_daily_message(
                         .ok_or(anyhow!("No files in data dir"))?;
 
                     let texts = fs::read_to_string(file.path())?
-                        // .replace("_", "\\_") // TODO preprocess data source files, see https://core.telegram.org/bots/api#formatting-options
-                        // .replace("*", "\\*")
-                        // .replace("[", "\\[")
-                        // .replace("]", "\\]")
-                        // .replace("(", "\\(")
-                        // .replace(")", "\\)")
-                        // .replace("`", "\\`")
-                        // .replace("#", "\\#")
-                        // .replace(".", "\\.")
-                        // .replace("-", "\\-")
                         .chars()
                         .collect::<Vec<char>>()
-                        .chunks(4096) // TODO const
+                        .chunks(TELEGRAM_TEXT_MAX_LENGTH) // TODO const
                         .map(|chunk| chunk.iter().collect::<String>())
                         .collect::<Vec<String>>();
 
                     for text in texts {
-                        bot.send_message(ChatId(chat_id), text).parse_mode(ParseMode::Markdown).await?; // TODO enable v2
+                        bot.send_message(ChatId(chat_id), text).parse_mode(ParseMode::MarkdownV2).await?;
                     }
                 }
             }
@@ -244,12 +232,16 @@ async fn migrate_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), anyhow::Error> {
     // TODO anyhow::Result
     pretty_env_logger::init();
 
     let db_url = &env::var("DATABASE_URL")?;
-    let data_dir = &env::var("DATA_DIR")?;
+    let data_dir_str = env::var("DATA_DIR")?;
+
+    if !Path::new(&data_dir_str).is_dir() {
+        Err(anyhow!("DATA_DIR is not a directory"))?;
+    }
 
     let pool = Arc::new(SqlitePool::connect(db_url).await?);
 
@@ -265,7 +257,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (shutdown_send, shutdown_recv) = tokio::sync::mpsc::channel(1);
 
     let send_daily_message_task = tokio::spawn(async move {
-        match send_daily_message(send_bot.clone(), send_pool.clone(), shutdown_recv).await {
+        let data_dir = Path::new(&data_dir_str);
+
+        match send_daily_message(send_bot.clone(), send_pool.clone(), data_dir, shutdown_recv).await
+        {
             Ok(_) => (),
             Err(e) => log::error!("Failed to send daily message: {}", e),
         }
@@ -289,7 +284,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut stream = signal(SignalKind::interrupt())?;
     tokio::spawn(async move {
         stream.recv().await;
-        let _ = shutdown_send.send(());
+
+        shutdown_send.send(()).await
     });
 
     send_daily_message_task.await?;
