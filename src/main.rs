@@ -188,7 +188,7 @@ async fn send_daily_message(
                     let texts = fs::read_to_string(file.path())?
                         .chars()
                         .collect::<Vec<char>>()
-                        .chunks(TELEGRAM_TEXT_MAX_LENGTH) // TODO const
+                        .chunks(TELEGRAM_TEXT_MAX_LENGTH)
                         .map(|chunk| chunk.iter().collect::<String>())
                         .collect::<Vec<String>>();
 
@@ -233,7 +233,6 @@ async fn migrate_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
-    // TODO anyhow::Result
     pretty_env_logger::init();
 
     let db_url = &env::var("DATABASE_URL")?;
