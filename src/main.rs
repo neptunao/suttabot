@@ -1,25 +1,22 @@
 use anyhow::anyhow;
 use anyhow::Result;
-use chrono::Duration;
-use chrono::{Local, Utc};
-use log::debug;
-use log::info;
-use log::warn;
+use chrono::{Duration, Local, Utc};
+use log::{debug, error, info, warn};
 use rand::seq::IteratorRandom;
 use sqlx::SqlitePool;
-use std::fs;
-use std::path::Path;
-use std::{env, error::Error, sync::Arc};
-use teloxide::types::ParseMode;
+use std::{env, error::Error, fs, path::Path, sync::Arc};
 use teloxide::{
     dispatching::dialogue::GetChatId,
     payloads::SendMessageSetters,
     prelude::*,
+    types::ParseMode,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, Me},
     utils::command::BotCommands,
 };
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::time::{interval_at, Instant};
+
+mod dto;
 
 #[derive(BotCommands)]
 #[command(rename_rule = "lowercase")]
@@ -27,8 +24,6 @@ enum Command {
     Help,
     Start,
 }
-
-mod dto;
 
 const TELEGRAM_TEXT_MAX_LENGTH: usize = 4096;
 
@@ -266,7 +261,7 @@ async fn send_daily_message(
                     for text in texts {
                         let send_result = bot.send_message(ChatId(chat_id), text).parse_mode(ParseMode::MarkdownV2).await;
                         if let Err(e) = send_result {
-                            log::error!("Failed to send message to chat_id: {}, error: {}", chat_id, e);
+                            error!("Failed to send message to chat_id: {}, error: {}", chat_id, e);
                         }
                     }
                 }
@@ -335,7 +330,7 @@ async fn main() -> Result<(), anyhow::Error> {
         match send_daily_message(send_bot.clone(), send_pool.clone(), data_dir, shutdown_recv).await
         {
             Ok(_) => (),
-            Err(e) => log::error!("Failed to send daily message: {}", e),
+            Err(e) => error!("Failed to send daily message: {}", e),
         }
     });
 
