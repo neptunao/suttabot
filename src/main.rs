@@ -4,6 +4,7 @@ use chrono::{Duration, Local, Utc};
 use log::{debug, error, info, warn};
 use rand::seq::IteratorRandom;
 use sqlx::SqlitePool;
+use tokio::sync::mpsc;
 use std::{env, error::Error, fs, path::Path, sync::Arc};
 use teloxide::{
     dispatching::dialogue::GetChatId,
@@ -200,7 +201,7 @@ async fn send_daily_message(
     pool: Arc<SqlitePool>,
     interval_sec: i64,
     data_dir: &Path,
-    mut shutdown_signal: tokio::sync::mpsc::Receiver<()>,
+    mut shutdown_signal: mpsc::Receiver<()>,
 ) -> anyhow::Result<()> {
     let now = Instant::now();
     // TODO env var for daily message time
@@ -324,7 +325,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let send_bot = bot.clone();
     let send_pool = pool.clone();
-    let (shutdown_send, shutdown_recv) = tokio::sync::mpsc::channel(1);
+    let (shutdown_send, shutdown_recv) = mpsc::channel(1);
 
     let send_daily_message_task = tokio::spawn(async move {
         let data_dir = Path::new(&data_dir_str);

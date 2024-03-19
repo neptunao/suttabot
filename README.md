@@ -1,41 +1,36 @@
 # suttabot
 
-This is a Telegram bot implemented in Rust using the Teloxide library.
+This project is a Telegram bot written in Rust, using the [teloxide](https://github.com/teloxide/teloxide) library. The bot allows users to subscribe or unsubscribe from daily suttas (ancient buddhist scriptures) in Russian translation of the [Theravada](https://en.wikipedia.org/wiki/Theravada) branch of buddhism. The messages are sent from a collection of files in a specified directory, with one file randomly chosen each day. The bot uses SQLite for storing subscription data.
 
-## Project Structure
+Note that this project currently support **only Russian language**.
 
+The data is not stored in the repo to avoid conflict with authors. All suttas are taken from site [theravada.ru](https://www.theravada.ru/Teaching/canon.htm), which is one of the biggest sites with Russian translations of Theravada teachings and suttas.
+
+## Environment Variables
+
+| Variable | Description | Required | Default |
+| --- | --- | --- | --- |
+| `TELOXIDE_TOKEN` | The telegram bot token. | Yes | None |
+| `DATABASE_URL` | The URL of the SQLite database. | Yes | None |
+| `DATA_DIR` | The directory where the message files are stored. | Yes | None |
+| `MESSAGE_INTERVAL` | The interval in seconds between each daily message. | No | 86400 (24 hours) |
+
+## Running Locally
+
+### Without Docker
+
+1. Set the required environment variables
+2. Run the project: `cargo run`
+
+### With Docker
+
+1. Install Docker: https://docs.docker.com/get-docker/
+2. Build the Docker image: `docker build -t suttabot .`
+3. Run the Docker container, passing in the environment variables:
+
+```bash
+docker run -d --name=suttabot -e RUST_LOG=info -e TELOXIDE_TOKEN="<TELOXIDE_TOKEN>" -e DATABASE_URL="sqlite:///db/suttabot.db" -e DATA_DIR="/data" -v "<LOCAL_DB_PATH>:/db/suttabot.db" -v "<LOCAL_DATA_PATH>:/data" suttabot
 ```
-suttabot
-├── src
-│   ├── main.rs
-│   ├── commands
-│   │   └── mod.rs
-│   └── handlers
-│       └── mod.rs
-├── Cargo.toml
-└── README.md
-```
-
-## Files
-
-- `src/main.rs`: This file is the entry point of the application. It contains the main function that initializes the Telegram bot using the Teloxide library and sets up the bot's behavior.
-
-- `src/commands/mod.rs`: This file exports the modules for different bot commands. You can define separate modules for each command and implement the logic for handling those commands.
-
-- `src/handlers/mod.rs`: This file exports the modules for different event handlers. You can define separate modules for handling different types of events, such as message events, callback query events, etc.
-
-- `Cargo.toml`: This file is the configuration file for Cargo, the package manager and build system for Rust. It lists the dependencies and other project metadata.
-
-## Usage
-
-To use this Telegram bot, follow these steps:
-
-1. Clone the repository: `git clone https://github.com/your-username/suttabot.git`
-2. Navigate to the project directory: `cd suttabot`
-3. Build the project: `cargo build`
-4. Run the bot: `cargo run`
-
-Make sure to set up your Telegram bot token and other configuration options in the `main.rs` file before running the bot.
 
 ## Contributing
 
@@ -44,3 +39,5 @@ Contributions are welcome! If you have any suggestions, bug reports, or feature 
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+All suttas and texts are taken from [theravada.ru](https://www.theravada.ru/) website.
