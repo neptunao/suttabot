@@ -198,6 +198,7 @@ async fn answer_message_with_replace(
 async fn send_daily_message(
     bot: Bot,
     pool: Arc<SqlitePool>,
+    interval_sec: i64,
     data_dir: &Path,
     mut shutdown_signal: tokio::sync::mpsc::Receiver<()>,
 ) -> anyhow::Result<()> {
@@ -207,12 +208,10 @@ async fn send_daily_message(
     let start_time = now + duration;
     let mut interval = interval_at(
         start_time,
-        Duration::try_days(1)
+        Duration::try_seconds(interval_sec)
             .ok_or(anyhow!("Invalid time"))?
             .to_std()?,
     );
-    let mut interval =
-        tokio::time::interval(Duration::try_seconds(60).ok_or(anyhow!("123"))?.to_std()?);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     info!("Reading files from data dir");
@@ -223,8 +222,8 @@ async fn send_daily_message(
         .collect::<Vec<_>>();
 
     info!(
-        "starting daily message task with interval: {:?} and {} files",
-        interval,
+        "starting daily message task with interval: {}s and {} files",
+        interval_sec,
         files.len()
     );
 
@@ -306,6 +305,9 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let db_url = &env::var("DATABASE_URL")?;
     let data_dir_str = env::var("DATA_DIR")?;
+    let interval: i64 = env::var("MESSAGE_INTERVAL")
+        .unwrap_or("86400".to_string()) // in seconds
+        .parse()?;
 
     if !Path::new(&data_dir_str).is_dir() {
         Err(anyhow!("DATA_DIR is not a directory"))?;
@@ -327,8 +329,16 @@ async fn main() -> Result<(), anyhow::Error> {
     let send_daily_message_task = tokio::spawn(async move {
         let data_dir = Path::new(&data_dir_str);
 
-        match send_daily_message(send_bot.clone(), send_pool.clone(), data_dir, shutdown_recv).await
-        {
+        let send_result = send_daily_message(
+            send_bot.clone(),
+            send_pool.clone(),
+            interval,
+            data_dir,
+            shutdown_recv,
+        )
+        .await;
+
+        match send_result {
             Ok(_) => (),
             Err(e) => error!("Failed to send daily message: {}", e),
         }
