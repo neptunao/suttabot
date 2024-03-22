@@ -6,6 +6,8 @@ Note that this project currently support **only Russian language**.
 
 The data is not stored in the repo to avoid conflict with authors. All suttas are taken from site [theravada.ru](https://www.theravada.ru/Teaching/canon.htm), which is one of the biggest sites with Russian translations of Theravada teachings and suttas.
 
+Inspired by [Reading Faithfully](https://readingfaithfully.org/).
+
 ## Environment Variables
 
 | Variable | Description | Required | Default |

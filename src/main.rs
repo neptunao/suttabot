@@ -4,7 +4,6 @@ use chrono::{Duration, Local, Utc};
 use log::{debug, error, info, warn};
 use rand::seq::IteratorRandom;
 use sqlx::SqlitePool;
-use tokio::sync::mpsc;
 use std::{env, error::Error, fs, path::Path, sync::Arc};
 use teloxide::{
     dispatching::dialogue::GetChatId,
@@ -15,6 +14,7 @@ use teloxide::{
     utils::command::BotCommands,
 };
 use tokio::signal::unix::{signal, SignalKind};
+use tokio::sync::mpsc;
 use tokio::time::{interval_at, Instant};
 
 mod dto;
@@ -42,6 +42,26 @@ fn make_keyboard() -> InlineKeyboardMarkup {
 
         keyboard.push(row);
     }
+
+    InlineKeyboardMarkup::new(keyboard)
+}
+
+fn make_unsubscribe_keyboard() -> InlineKeyboardMarkup {
+    let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
+    let subscribe =
+        InlineKeyboardButton::callback("Отписаться".to_owned(), "Отписаться".to_owned());
+
+    keyboard.push(vec![subscribe]);
+
+    InlineKeyboardMarkup::new(keyboard)
+}
+
+fn make_subscribe_keyboard() -> InlineKeyboardMarkup {
+    let mut keyboard: Vec<Vec<InlineKeyboardButton>> = vec![];
+    let subscribe =
+        InlineKeyboardButton::callback("Подписаться".to_owned(), "Подписаться".to_owned());
+
+    keyboard.push(vec![subscribe]);
 
     InlineKeyboardMarkup::new(keyboard)
 }
@@ -96,9 +116,6 @@ async fn callback_handler(
 
             match chosen_action.as_str() {
                 "Подписаться" => {
-                    // TODO check if chat_id already exists and is_enabled = 1
-                    // if so, return, else insert, else if is_enabled = 0, update to 1
-
                     let existing_subscription = sqlx::query_as::<_, dto::SubscriptionDto>(
                         "SELECT * FROM subscription WHERE chat_id = ?",
                     )
@@ -112,7 +129,14 @@ async fn callback_handler(
                                 info!("Chat_id: {} already subscribed, doing nothing", chat_id);
 
                                 let text = "Вы уже подписаны на рассылку";
-                                answer_message_with_replace(&bot, q.id, q.message, text).await?;
+                                answer_message_with_replace(
+                                    &bot,
+                                    q.id,
+                                    q.message,
+                                    text,
+                                    make_unsubscribe_keyboard(),
+                                )
+                                .await?;
 
                                 return Ok(());
                             }
@@ -131,7 +155,14 @@ async fn callback_handler(
                                 .await?;
 
                             let text = "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве";
-                            answer_message_with_replace(&bot, q.id, q.message, text).await?;
+                            answer_message_with_replace(
+                                &bot,
+                                q.id,
+                                q.message,
+                                text,
+                                make_unsubscribe_keyboard(),
+                            )
+                            .await?;
 
                             return Ok(());
                         }
@@ -148,7 +179,14 @@ async fn callback_handler(
 
                             let text = "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве";
 
-                            answer_message_with_replace(&bot, q.id, q.message, text).await?;
+                            answer_message_with_replace(
+                                &bot,
+                                q.id,
+                                q.message,
+                                text,
+                                make_unsubscribe_keyboard(),
+                            )
+                            .await?;
 
                             return Ok(());
                         }
@@ -167,7 +205,14 @@ async fn callback_handler(
 
                     let text = "Вы отписались от рассылки";
 
-                    answer_message_with_replace(&bot, q.id, q.message, text).await?;
+                    answer_message_with_replace(
+                        &bot,
+                        q.id,
+                        q.message,
+                        text,
+                        make_subscribe_keyboard(),
+                    )
+                    .await?;
 
                     return Ok(());
                 }
@@ -186,11 +231,14 @@ async fn answer_message_with_replace(
     callback_query_id: String,
     message: Option<Message>,
     text: &str,
+    keyboard: InlineKeyboardMarkup,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     bot.answer_callback_query(callback_query_id).await?;
 
     if let Some(Message { id, chat, .. }) = message {
-        bot.edit_message_text(chat.id, id, text).await?;
+        bot.edit_message_text(chat.id, id, text)
+            .reply_markup(keyboard)
+            .await?;
     }
 
     Ok(())
@@ -204,7 +252,7 @@ async fn send_daily_message(
     mut shutdown_signal: mpsc::Receiver<()>,
 ) -> anyhow::Result<()> {
     let now = Instant::now();
-    // TODO env var for daily message time
+    // TODO input for daily message time
     let duration = duration_until(5, 0)?; // 8:00 Moscow time is 5:00 UTC
     let start_time = now + duration;
     let mut interval = interval_at(
@@ -258,9 +306,14 @@ async fn send_daily_message(
 
                     info!("Sending daily message to chat_id: {}, filename: {}", chat_id, file.file_name().to_string_lossy());
 
-                    for text in texts {
-                        let send_result = bot.send_message(ChatId(chat_id), text).parse_mode(ParseMode::MarkdownV2).await;
-                        if let Err(e) = send_result {
+                    for (i, text) in texts.iter().enumerate() {
+                        let mut send_msg = bot.send_message(ChatId(chat_id), text).parse_mode(ParseMode::MarkdownV2);
+
+                        if i == texts.len() - 1 {
+                            send_msg = send_msg.reply_markup(make_unsubscribe_keyboard()); // TODO bug: last message will be replaced with keyboard if unsubscribe is clicked
+                        }
+
+                        if let Err(e) = send_msg.await {
                             error!("Failed to send message to chat_id: {}, error: {}", chat_id, e);
                         }
                     }
