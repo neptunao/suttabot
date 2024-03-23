@@ -1,9 +1,9 @@
 use anyhow::anyhow;
 use anyhow::Result;
 use chrono::{Duration, Local, Utc};
+use db::DbService;
 use log::{debug, error, info, warn};
 use rand::seq::IteratorRandom;
-use sqlx::SqlitePool;
 use std::{env, error::Error, fs, path::Path, sync::Arc};
 use teloxide::{
     dispatching::dialogue::GetChatId,
@@ -17,6 +17,7 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::time::{interval_at, Instant};
 
+mod db;
 mod dto;
 
 #[derive(BotCommands)]
@@ -105,7 +106,7 @@ async fn message_handler(
 }
 
 async fn callback_handler(
-    pool: Arc<SqlitePool>,
+    db: Arc<DbService>,
     bot: Bot,
     q: CallbackQuery,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -116,12 +117,7 @@ async fn callback_handler(
 
             match chosen_action.as_str() {
                 "Подписаться" => {
-                    let existing_subscription = sqlx::query_as::<_, dto::SubscriptionDto>(
-                        "SELECT * FROM subscription WHERE chat_id = ?",
-                    )
-                    .bind(chat_id.to_string())
-                    .fetch_optional(pool.as_ref())
-                    .await?;
+                    let existing_subscription = db.get_subscription_by_chat_id(chat_id.0).await?;
 
                     match existing_subscription {
                         Some(subscription) => {
@@ -146,13 +142,7 @@ async fn callback_handler(
                                 subscription.id, chat_id
                             );
 
-                            sqlx::query(
-                                    "UPDATE subscription SET is_enabled = 1, updated_at = ? WHERE id = ?",
-                                )
-                                .bind(timestamp)
-                                .bind(subscription.id)
-                                .execute(pool.as_ref())
-                                .await?;
+                            db.set_subscription_enabled(chat_id.0, 1, timestamp).await?;
 
                             let text = "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве";
                             answer_message_with_replace(
@@ -169,13 +159,7 @@ async fn callback_handler(
                         None => {
                             info!("Inserting new subscription for chat_id: {}", chat_id);
 
-                            sqlx::query("INSERT INTO subscription (chat_id, is_enabled, created_at, updated_at) VALUES (?, ?, ?, ?)")
-                                .bind(chat_id.to_string())
-                                .bind(1)
-                                .bind(timestamp)
-                                .bind(timestamp)
-                                .execute(pool.as_ref())
-                                .await?;
+                            db.create_subscription(chat_id.0, 1, timestamp).await?;
 
                             let text = "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве";
 
@@ -195,13 +179,7 @@ async fn callback_handler(
                 "Отписаться" => {
                     info!("Disabling subscription for chat_id: {}", chat_id);
 
-                    sqlx::query(
-                        "UPDATE subscription SET is_enabled = 0, updated_at = ? WHERE chat_id = ?",
-                    )
-                    .bind(timestamp)
-                    .bind(chat_id.to_string())
-                    .execute(pool.as_ref())
-                    .await?;
+                    db.set_subscription_enabled(chat_id.0, 0, timestamp).await?;
 
                     let text = "Вы отписались от рассылки";
 
@@ -246,7 +224,7 @@ async fn answer_message_with_replace(
 
 async fn send_daily_message(
     bot: Bot,
-    pool: Arc<SqlitePool>,
+    db: Arc<DbService>,
     interval_sec: i64,
     data_dir: &Path,
     mut shutdown_signal: mpsc::Receiver<()>,
@@ -282,12 +260,7 @@ async fn send_daily_message(
                 info!("Sending daily message");
                 debug!("Querying chat_ids");
 
-                let chat_ids = sqlx::query_as::<_, (i64,)>("SELECT chat_id FROM subscription WHERE is_enabled = 1")
-                    .fetch_all(pool.as_ref())
-                    .await?
-                    .into_iter()
-                    .map(|(chat_id,)| chat_id)
-                    .collect::<Vec<i64>>();
+                let chat_ids = db.get_enabled_chat_ids().await?;
 
                 debug!("Got {} chat_ids", chat_ids.len());
 
@@ -347,12 +320,6 @@ fn duration_until(hour: u32, min: u32) -> Result<std::time::Duration, anyhow::Er
     Ok(res_duration.to_std()?)
 }
 
-async fn migrate_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::migrate!("./db/migrations").run(pool).await?;
-
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     pretty_env_logger::init();
@@ -367,17 +334,17 @@ async fn main() -> Result<(), anyhow::Error> {
         Err(anyhow!("DATA_DIR is not a directory"))?;
     }
 
-    let pool = Arc::new(SqlitePool::connect(db_url).await?);
+    let db_service = Arc::new(DbService::new_sqlite(db_url).await?);
 
     info!("Migrating database...");
-    migrate_db(pool.as_ref()).await?;
+    db_service.migrate().await?;
     info!("Database migrated");
 
-    info!("Starting buttons bot...");
+    info!("Starting bot...");
     let bot = Bot::from_env();
 
     let send_bot = bot.clone();
-    let send_pool = pool.clone();
+    let send_db = db_service.clone();
     let (shutdown_send, shutdown_recv) = mpsc::channel(1);
 
     let send_daily_message_task = tokio::spawn(async move {
@@ -385,7 +352,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
         let send_result = send_daily_message(
             send_bot.clone(),
-            send_pool.clone(),
+            send_db.clone(),
             interval,
             data_dir,
             shutdown_recv,
@@ -398,13 +365,12 @@ async fn main() -> Result<(), anyhow::Error> {
         }
     });
 
-    let receiver_pool = pool.clone();
+    let recv_db = db_service.clone();
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(message_handler))
         .branch(
-            Update::filter_callback_query().endpoint(move |bot: Bot, q| {
-                callback_handler(receiver_pool.clone(), bot.clone(), q)
-            }),
+            Update::filter_callback_query()
+                .endpoint(move |bot: Bot, q| callback_handler(recv_db.clone(), bot.clone(), q)),
         );
 
     Dispatcher::builder(bot.clone(), handler)
