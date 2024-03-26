@@ -3,13 +3,11 @@ use anyhow::Result;
 use chrono::{Duration, Local, Utc};
 use db::DbService;
 use log::{debug, error, info, warn};
-use rand::seq::IteratorRandom;
-use std::{env, error::Error, fs, path::Path, sync::Arc};
+use std::{env, error::Error, path::Path, sync::Arc};
 use teloxide::{
     dispatching::dialogue::GetChatId,
     payloads::SendMessageSetters,
     prelude::*,
-    types::ParseMode,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, Me},
     utils::command::BotCommands,
 };
@@ -17,8 +15,11 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::time::{interval_at, Instant};
 
+use crate::sender::send_daily_message;
+
 mod db;
 mod dto;
+mod sender;
 
 #[derive(BotCommands)]
 #[command(rename_rule = "lowercase")]
@@ -27,7 +28,7 @@ enum Command {
     Start,
 }
 
-const TELEGRAM_TEXT_MAX_LENGTH: usize = 4096;
+const RETRY_LIMIT: u8 = 5;
 
 /// Creates a keyboard made by buttons in a big column.
 fn make_keyboard() -> InlineKeyboardMarkup {
@@ -222,7 +223,7 @@ async fn answer_message_with_replace(
     Ok(())
 }
 
-async fn send_daily_message(
+async fn send_daily_messages(
     bot: Bot,
     db: Arc<DbService>,
     interval_sec: i64,
@@ -261,34 +262,15 @@ async fn send_daily_message(
                 debug!("Querying chat_ids");
 
                 let chat_ids = db.get_enabled_chat_ids().await?;
-
                 debug!("Got {} chat_ids", chat_ids.len());
 
                 for chat_id in chat_ids {
-                    let file = files
-                        .iter()
-                        .choose(&mut rand::thread_rng()) // Use the choose method on the iterator
-                        .ok_or(anyhow!("No files in data dir"))?;
+                    let mut success = send_daily_message(&bot, chat_id, &files, make_unsubscribe_keyboard()).await.is_ok();
+                    let mut retry_count = 0;
 
-                    let texts = fs::read_to_string(file.path())?
-                        .chars()
-                        .collect::<Vec<char>>()
-                        .chunks(TELEGRAM_TEXT_MAX_LENGTH)
-                        .map(|chunk| chunk.iter().collect::<String>())
-                        .collect::<Vec<String>>();
-
-                    info!("Sending daily message to chat_id: {}, filename: {}", chat_id, file.file_name().to_string_lossy());
-
-                    for (i, text) in texts.iter().enumerate() {
-                        let mut send_msg = bot.send_message(ChatId(chat_id), text).parse_mode(ParseMode::MarkdownV2);
-
-                        if i == texts.len() - 1 {
-                            send_msg = send_msg.reply_markup(make_unsubscribe_keyboard()); // TODO bug: last message will be replaced with keyboard if unsubscribe is clicked
-                        }
-
-                        if let Err(e) = send_msg.await {
-                            error!("Failed to send message to chat_id: {}, error: {}", chat_id, e);
-                        }
+                    while !success && retry_count < RETRY_LIMIT {
+                        retry_count += 1;
+                        success = send_daily_message(&bot, chat_id, &files, make_unsubscribe_keyboard()).await.is_ok();
                     }
                 }
             }
@@ -350,7 +332,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let send_daily_message_task = tokio::spawn(async move {
         let data_dir = Path::new(&data_dir_str);
 
-        let send_result = send_daily_message(
+        let send_result = send_daily_messages(
             send_bot.clone(),
             send_db.clone(),
             interval,
