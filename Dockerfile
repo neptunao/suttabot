@@ -2,7 +2,7 @@ FROM debian:bookworm-slim as run
 
 RUN apt-get update -y && apt-get install -y ca-certificates
 
-FROM rust:1.76 as builder
+FROM rust:1.77 as builder
 
 WORKDIR /usr/src
 
