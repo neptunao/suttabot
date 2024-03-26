@@ -1,8 +1,4 @@
-FROM debian:bookworm-slim as run
-
-RUN apt-get update -y && apt-get install -y ca-certificates
-
-FROM rust:1.76 as builder
+FROM rust:1.77 as builder
 
 WORKDIR /usr/src
 
@@ -23,12 +19,12 @@ COPY ./db ./db
 RUN rm ./target/release/deps/suttabot*
 RUN cargo build --release
 
-FROM run
+FROM gcr.io/distroless/cc-debian12
 
 ENV RUST_LOG=info
 ENV DATABASE_URL=sqlite://db/suttabot.db
 ENV DATA_DIR=/data
 
-COPY --from=builder /usr/src/app/target/release/suttabot /usr/local/bin/suttabot
+COPY --from=builder /usr/src/app/target/release/suttabot /
 
-ENTRYPOINT ["suttabot"]
+CMD ["./suttabot"]
