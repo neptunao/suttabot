@@ -270,7 +270,16 @@ async fn send_daily_messages(
 
                     while !success && retry_count < RETRY_LIMIT {
                         retry_count += 1;
+                        warn!("Failed to send message to chat_id: {}, retry attempt: {}", chat_id, retry_count);
                         success = send_daily_message(&bot, chat_id, &files, make_unsubscribe_keyboard()).await.is_ok();
+
+                        if retry_count == RETRY_LIMIT {
+                            error!("Failed to send message to chat_id: {} after {} attempts", chat_id, RETRY_LIMIT);
+                        }
+                    }
+
+                    if success {
+                        info!("Sent daily message to chat_id: {}", chat_id);
                     }
                 }
             }

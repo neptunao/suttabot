@@ -49,6 +49,7 @@ pub async fn send_daily_message(
 
         //TODO remove previous message if second failed to send
         if let Err(e) = send_msg.await {
+            // TODO domain error handling: check RequestError::Api(api_error) and only in this case can retry
             error!(
                 "Failed to send message to chat_id: {} filename: {} error: {}",
                 chat_id,
