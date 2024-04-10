@@ -16,6 +16,7 @@ use tokio::sync::mpsc;
 use tokio::time::{interval_at, Instant};
 
 use crate::sender::send_daily_message;
+use crate::sender::TgMessageSendError;
 
 mod db;
 mod dto;
@@ -29,6 +30,7 @@ enum Command {
 }
 
 const RETRY_LIMIT: u8 = 5;
+const RETRY_INTERVAL_SEC: u64 = 5;
 
 /// Creates a keyboard made by buttons in a big column.
 fn make_keyboard() -> InlineKeyboardMarkup {
@@ -223,6 +225,18 @@ async fn answer_message_with_replace(
     Ok(())
 }
 
+fn can_retry_error_with_interval(e: &TgMessageSendError) -> (bool, std::time::Duration) {
+    match e {
+        TgMessageSendError::RetryAfter(duration) => (true, *duration),
+        TgMessageSendError::TeloxideError(e) => {
+            (true, std::time::Duration::from_secs(RETRY_INTERVAL_SEC))
+        }
+        TgMessageSendError::UnknownError(e) => {
+            (false, std::time::Duration::from_secs(RETRY_INTERVAL_SEC))
+        }
+    }
+}
+
 async fn send_daily_messages(
     bot: Bot,
     db: Arc<DbService>,
@@ -265,21 +279,33 @@ async fn send_daily_messages(
                 debug!("Got {} chat_ids", chat_ids.len());
 
                 for chat_id in chat_ids {
-                    let mut success = send_daily_message(&bot, chat_id, &files, make_unsubscribe_keyboard()).await.is_ok();
+                    let send_result = send_daily_message(&bot, chat_id, &files, make_unsubscribe_keyboard()).await;
+                    if send_result.is_ok() {
+                        info!("Sent daily message to chat_id: {}", chat_id);
+                        continue;
+                    }
+
+                    let mut success = false;
+                    let send_err = send_result.unwrap_err();
+                    let (is_recoverable, mut retry_interval) = can_retry_error_with_interval(&send_err);
+                    if !is_recoverable {
+                        error!("Failed to send message to chat_id: {}, error: {:?}", chat_id, send_err);
+                        continue;
+                    }
+
                     let mut retry_count = 0;
 
                     while !success && retry_count < RETRY_LIMIT {
                         retry_count += 1;
                         warn!("Failed to send message to chat_id: {}, retry attempt: {}", chat_id, retry_count);
+
+                        tokio::time::sleep(retry_interval).await;
                         success = send_daily_message(&bot, chat_id, &files, make_unsubscribe_keyboard()).await.is_ok();
+                        retry_interval *= 2; // exponential backoff
 
                         if retry_count == RETRY_LIMIT {
                             error!("Failed to send message to chat_id: {} after {} attempts", chat_id, RETRY_LIMIT);
                         }
-                    }
-
-                    if success {
-                        info!("Sent daily message to chat_id: {}", chat_id);
                     }
                 }
             }
