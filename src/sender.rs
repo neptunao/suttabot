@@ -1,7 +1,6 @@
 use anyhow::anyhow;
 use anyhow::Result;
-use log::warn;
-use log::{error, info};
+use log::{debug, error, info};
 use rand::seq::IteratorRandom;
 use std::fs;
 use std::fs::DirEntry;
@@ -34,7 +33,7 @@ fn map_send_error<T>(send_result: Result<T, RequestError>) -> Result<(), TgMessa
             match e {
                 // ignoring this error due to teloxide bug
                 teloxide::RequestError::InvalidJson { source: _, raw: _ } => {
-                    warn!("Ignoring InvalidJson error: {}", e);
+                    debug!("Ignoring InvalidJson error: {}", e);
                     Ok(())
                 }
                 teloxide::RequestError::RetryAfter(duration) => {
