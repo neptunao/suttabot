@@ -231,7 +231,7 @@ fn can_retry_error_with_interval(e: &TgMessageSendError) -> (bool, std::time::Du
         TgMessageSendError::TeloxideError(_e) => {
             (true, std::time::Duration::from_secs(RETRY_INTERVAL_SEC))
         }
-        TgMessageSendError::UnknownError(e) => {
+        TgMessageSendError::UnknownError(_e) => {
             (false, std::time::Duration::from_secs(RETRY_INTERVAL_SEC))
         }
     }
@@ -295,7 +295,7 @@ async fn send_daily_messages(
 
                             while !success && retry_count < RETRY_LIMIT {
                                 retry_count += 1;
-                                warn!("Failed to send message to chat_id: {}, retry attempt: {}", chat_id, retry_count);
+                                error!("Failed to send message to chat_id: {}, error: {:?}, retry attempt: {}", chat_id, send_err, retry_count);
 
                                 tokio::time::sleep(retry_interval).await;
                                 success = match send_daily_message(&bot, chat_id, &files, make_unsubscribe_keyboard()).await {
