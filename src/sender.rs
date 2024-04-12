@@ -1,5 +1,6 @@
 use anyhow::anyhow;
 use anyhow::Result;
+use log::warn;
 use log::{debug, error, info};
 use rand::seq::IteratorRandom;
 use std::fs;
@@ -20,6 +21,8 @@ const TELEGRAM_TEXT_MAX_LENGTH: usize = 4096;
 pub enum TgMessageSendError {
     #[error("TgMessageSendError.RetryAfter: {0:?}")]
     RetryAfter(std::time::Duration),
+    #[error("TgMessageSendError.BotBlocked")]
+    BotBlocked,
     #[error("TgMessageSendError.TeloxideError: {0}")]
     TeloxideError(teloxide::RequestError),
     #[error("TgMessageSendError.UnknownError: {0}")]
@@ -39,6 +42,12 @@ fn map_send_error<T>(send_result: Result<T, RequestError>) -> Result<(), TgMessa
                 teloxide::RequestError::RetryAfter(duration) => {
                     Err(TgMessageSendError::RetryAfter(duration))
                 }
+                teloxide::RequestError::Api(api_error) => match api_error {
+                    teloxide::ApiError::BotBlocked => Err(TgMessageSendError::BotBlocked),
+                    _ => Err(TgMessageSendError::TeloxideError(
+                        teloxide::RequestError::Api(api_error.clone()),
+                    )),
+                },
 
                 _ => Err(TgMessageSendError::TeloxideError(e)),
             }

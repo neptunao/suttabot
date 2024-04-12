@@ -234,6 +234,9 @@ fn can_retry_error_with_interval(e: &TgMessageSendError) -> (bool, std::time::Du
         TgMessageSendError::UnknownError(_e) => {
             (false, std::time::Duration::from_secs(RETRY_INTERVAL_SEC))
         }
+        TgMessageSendError::BotBlocked => {
+            (false, std::time::Duration::from_secs(RETRY_INTERVAL_SEC))
+        }
     }
 }
 
