@@ -10,6 +10,6 @@ pretty_env_logger = "0.5.0"
 tokio = { version =  "1.37.0", features = ["rt-multi-thread", "macros"] }
 anyhow = "1.0.82"
 sqlx = { version = "0.7.4", features = [ "runtime-tokio", "sqlite" ] }
-chrono = "0.4.37"
+chrono = "0.4.38"
 rand = "0.8.5"
 thiserror = "1.0.58"
