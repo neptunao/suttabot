@@ -42,4 +42,4 @@ Contributions are welcome! If you have any suggestions, bug reports, or feature 
 
 This project is licensed under the [MIT License](LICENSE).
 
-All suttas and texts are taken from [theravada.ru](https://www.theravada.ru/) website.
+All suttas and texts are taken from [theravada.ru](https://www.theravada.ru/) website and [SuttaCentral](https://suttacentral.net/) [repository](https://github.com/suttacentral/sc-data).
