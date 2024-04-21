@@ -1,6 +1,5 @@
 use anyhow::anyhow;
 use anyhow::Result;
-use log::warn;
 use log::{debug, error, info};
 use rand::seq::IteratorRandom;
 use std::fs;

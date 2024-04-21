@@ -27,6 +27,8 @@ mod sender;
 enum Command {
     Help,
     Start,
+    Unsubscribe,
+    Subscribe,
 }
 
 const RETRY_LIMIT: u8 = 5;
@@ -77,6 +79,7 @@ async fn message_handler(
     bot: Bot,
     msg: Message,
     me: Me,
+    db: Arc<DbService>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(text) = msg.text() {
         match BotCommands::parse(text, me.username()) {
@@ -98,7 +101,65 @@ async fn message_handler(
                     .reply_markup(keyboard)
                     .await?;
             }
+            Ok(Command::Unsubscribe) => {
+                let chat_id = msg.chat.id.0;
+                let existing_subscription = db.get_subscription_by_chat_id(chat_id).await?;
 
+                match existing_subscription {
+                    Some(subscription) => {
+                        if subscription.is_enabled == 0 {
+                            bot.send_message(msg.chat.id, "Вы уже отписаны от рассылки")
+                                .await?;
+
+                            return Ok(());
+                        }
+
+                        db.set_subscription_enabled(chat_id, 0, Utc::now().timestamp())
+                            .await?;
+
+                        bot.send_message(msg.chat.id, "Вы отписались от рассылки")
+                            .await?;
+                    }
+                    None => {
+                        bot.send_message(msg.chat.id, "Вы не подписаны на рассылку")
+                            .await?;
+                    }
+                }
+            }
+            Ok(Command::Subscribe) => {
+                let chat_id = msg.chat.id.0;
+                let existing_subscription = db.get_subscription_by_chat_id(chat_id).await?;
+
+                match existing_subscription {
+                    Some(subscription) => {
+                        if subscription.is_enabled == 1 {
+                            bot.send_message(msg.chat.id, "Вы уже подписаны на рассылку")
+                                .await?;
+
+                            return Ok(());
+                        }
+
+                        db.set_subscription_enabled(chat_id, 1, Utc::now().timestamp())
+                            .await?;
+
+                        bot.send_message(
+                            msg.chat.id,
+                            "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве",
+                        )
+                        .await?;
+                    }
+                    None => {
+                        db.create_subscription(chat_id, 1, Utc::now().timestamp())
+                            .await?;
+
+                        bot.send_message(
+                            msg.chat.id,
+                            "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве",
+                        )
+                        .await?;
+                    }
+                }
+            }
             Err(_) => {
                 bot.send_message(msg.chat.id, "Command not found!").await?;
             }
@@ -392,8 +453,13 @@ async fn main() -> Result<(), anyhow::Error> {
     });
 
     let recv_db = db_service.clone();
+    let handler_db = db_service.clone();
+
+    let message_handler_fn =
+        move |bot: Bot, msg: Message, me: Me| message_handler(bot, msg, me, handler_db.clone());
+
     let handler = dptree::entry()
-        .branch(Update::filter_message().endpoint(message_handler))
+        .branch(Update::filter_message().endpoint(message_handler_fn))
         .branch(
             Update::filter_callback_query()
                 .endpoint(move |bot: Bot, q| callback_handler(recv_db.clone(), bot.clone(), q)),
