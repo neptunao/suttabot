@@ -6,30 +6,21 @@ use log::{debug, error, info, warn};
 use std::{env, error::Error, path::Path, sync::Arc};
 use teloxide::{
     dispatching::dialogue::GetChatId,
-    payloads::SendMessageSetters,
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, Me},
-    utils::command::BotCommands,
 };
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::time::{interval_at, Instant};
 
+use crate::message_handler::message_handler;
 use crate::sender::send_daily_message;
 use crate::sender::TgMessageSendError;
 
 mod db;
 mod dto;
+mod message_handler;
 mod sender;
-
-#[derive(BotCommands)]
-#[command(rename_rule = "lowercase")]
-enum Command {
-    Help,
-    Start,
-    Unsubscribe,
-    Subscribe,
-}
 
 const RETRY_LIMIT: u8 = 5;
 const RETRY_INTERVAL_SEC: u64 = 5;
@@ -70,103 +61,6 @@ fn make_subscribe_keyboard() -> InlineKeyboardMarkup {
     keyboard.push(vec![subscribe]);
 
     InlineKeyboardMarkup::new(keyboard)
-}
-
-/// Parse the text wrote on Telegram and check if that text is a valid command
-/// or not, then match the command. If the command is `/start` it writes a
-/// markup with the `InlineKeyboardMarkup`.
-async fn message_handler(
-    bot: Bot,
-    msg: Message,
-    me: Me,
-    db: Arc<DbService>,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
-    if let Some(text) = msg.text() {
-        match BotCommands::parse(text, me.username()) {
-            Ok(Command::Help) => {
-                // Just send the description of all commands.
-                bot.send_message(msg.chat.id, Command::descriptions().to_string())
-                    .await?;
-            }
-            Ok(Command::Start) => {
-                bot.send_message(
-                    msg.chat.id,
-                    "Нажмите подписаться чтобы получать каждый день сутту из сайта theravada.ru",
-                )
-                .await?;
-
-                // Create a list of buttons and send them.
-                let keyboard = make_keyboard();
-                bot.send_message(msg.chat.id, "Выберите действие:")
-                    .reply_markup(keyboard)
-                    .await?;
-            }
-            Ok(Command::Unsubscribe) => {
-                let chat_id = msg.chat.id.0;
-                let existing_subscription = db.get_subscription_by_chat_id(chat_id).await?;
-
-                match existing_subscription {
-                    Some(subscription) => {
-                        if subscription.is_enabled == 0 {
-                            bot.send_message(msg.chat.id, "Вы уже отписаны от рассылки")
-                                .await?;
-
-                            return Ok(());
-                        }
-
-                        db.set_subscription_enabled(chat_id, 0, Utc::now().timestamp())
-                            .await?;
-
-                        bot.send_message(msg.chat.id, "Вы отписались от рассылки")
-                            .await?;
-                    }
-                    None => {
-                        bot.send_message(msg.chat.id, "Вы не подписаны на рассылку")
-                            .await?;
-                    }
-                }
-            }
-            Ok(Command::Subscribe) => {
-                let chat_id = msg.chat.id.0;
-                let existing_subscription = db.get_subscription_by_chat_id(chat_id).await?;
-
-                match existing_subscription {
-                    Some(subscription) => {
-                        if subscription.is_enabled == 1 {
-                            bot.send_message(msg.chat.id, "Вы уже подписаны на рассылку")
-                                .await?;
-
-                            return Ok(());
-                        }
-
-                        db.set_subscription_enabled(chat_id, 1, Utc::now().timestamp())
-                            .await?;
-
-                        bot.send_message(
-                            msg.chat.id,
-                            "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве",
-                        )
-                        .await?;
-                    }
-                    None => {
-                        db.create_subscription(chat_id, 1, Utc::now().timestamp())
-                            .await?;
-
-                        bot.send_message(
-                            msg.chat.id,
-                            "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве",
-                        )
-                        .await?;
-                    }
-                }
-            }
-            Err(_) => {
-                bot.send_message(msg.chat.id, "Command not found!").await?;
-            }
-        }
-    }
-
-    Ok(())
 }
 
 async fn callback_handler(
