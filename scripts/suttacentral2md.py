@@ -3,6 +3,15 @@ import argparse
 import re
 from markdownify import markdownify as md
 
+
+def filter_by_text(text):
+    filter_words = ["сутта идентична", "Сутта идентична", "сутты в точности идентичны", "сутта в точности идентична", "сутта полностью идентична"]
+    for word in filter_words:
+        if word in text:
+            return False
+
+    return True
+
 def escape_braces(text):
     # Regex pattern for markdown links
     markdown_link_pattern = r'\[.*?\]\(.*?\)'
@@ -40,6 +49,9 @@ def html_to_md(source_folder, target_folder):
                     html_content = f.read()
 
                 md_content = md(html_content)
+
+                if not filter_by_text(md_content):
+                    continue
 
                 with open(target_file, 'w') as f:
                     f.write(escape_braces(md_content))
