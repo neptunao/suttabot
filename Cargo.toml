@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 teloxide = { version = "0.12.2", features = ["macros", "auto-send"] }
-log = "0.4.21"
+log = "0.4.22"
 pretty_env_logger = "0.5.0"
 tokio = { version =  "1.37.0", features = ["rt-multi-thread", "macros"] }
 anyhow = "1.0.83"
