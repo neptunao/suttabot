@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use teloxide::Bot;
 
-const TELEGRAM_TEXT_MAX_LENGTH: usize = 4096;
+use crate::helpers::TELEGRAM_TEXT_MAX_LENGTH;
 
 #[derive(Error, Debug)]
 pub enum TgMessageSendError {
@@ -66,6 +66,15 @@ pub async fn send_daily_message(
         .ok_or(anyhow!("No files in data dir"))
         .map_err(TgMessageSendError::UnknownError)?;
 
+    send_message(bot, chat_id, file, keyboard).await
+}
+
+pub async fn send_message(
+    bot: &Bot,
+    chat_id: i64,
+    file: &DirEntry,
+    keyboard: InlineKeyboardMarkup,
+) -> Result<(), TgMessageSendError> {
     let texts = fs::read_to_string(file.path())
         .map_err(|err| anyhow!("Failed to read file: {:?} error: {}", file.path(), err))
         .map_err(TgMessageSendError::UnknownError)?
@@ -76,7 +85,7 @@ pub async fn send_daily_message(
         .collect::<Vec<String>>();
 
     info!(
-        "Sending daily message to chat_id: {}, filename: {}",
+        "Sending message to chat_id: {}, filename: {}",
         chat_id,
         file.file_name().to_string_lossy()
     );

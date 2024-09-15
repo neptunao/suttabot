@@ -1,7 +1,13 @@
 use crate::db::DbService;
+use crate::helpers::{list_files, MAX_RETRY_COUNT};
 use crate::make_keyboard;
+use crate::sender::{send_message, TgMessageSendError};
+use anyhow::{anyhow, Result};
 use chrono::Utc;
+use log::warn;
+use rand::seq::IteratorRandom;
 use std::error::Error;
+use std::path::PathBuf;
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::Me;
@@ -14,6 +20,7 @@ enum Command {
     Start,
     Unsubscribe,
     Subscribe,
+    Random,
 }
 
 async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -100,11 +107,42 @@ async fn handle_subscribe_command(
     Ok(())
 }
 
+async fn handle_random_command(
+    bot: Bot,
+    msg: Message,
+    data_dir: PathBuf,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let files = list_files(&data_dir)?;
+    // TODO refactor duplication here
+    let mut random_file = files
+        .iter()
+        .choose(&mut rand::thread_rng())
+        .ok_or(anyhow!("No files in data dir"))?;
+    let mut retry_count = 0;
+
+    while let Err(e) = send_message(&bot, msg.chat.id.0, random_file, make_keyboard()).await {
+        warn!("Error sending message: {}", e);
+        retry_count += 1;
+        // TODO refactor duplication here
+        random_file = files
+            .iter()
+            .choose(&mut rand::thread_rng())
+            .ok_or(anyhow!("No files in data dir"))?;
+
+        if retry_count >= MAX_RETRY_COUNT {
+            return Err(Box::new(e));
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn message_handler(
     bot: Bot,
     msg: Message,
     me: Me,
     db: Arc<DbService>,
+    data_dir: PathBuf,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(text) = msg.text() {
         match BotCommands::parse(text, me.username()) {
@@ -115,6 +153,9 @@ pub async fn message_handler(
             }
             Ok(Command::Subscribe) => {
                 handle_subscribe_command(bot.clone(), msg.clone(), db.clone()).await?
+            }
+            Ok(Command::Random) => {
+                handle_random_command(bot.clone(), msg.clone(), data_dir).await?
             }
             Err(_) => {
                 bot.send_message(msg.chat.id, "Command not found!").await?;

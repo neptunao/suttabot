@@ -2,7 +2,9 @@ use anyhow::anyhow;
 use anyhow::Result;
 use chrono::{Duration, Local, Utc};
 use db::DbService;
+use helpers::list_files;
 use log::{debug, error, info, warn};
+use std::path::PathBuf;
 use std::{env, error::Error, path::Path, sync::Arc};
 use teloxide::{
     dispatching::dialogue::GetChatId,
@@ -19,6 +21,7 @@ use crate::sender::TgMessageSendError;
 
 mod db;
 mod dto;
+mod helpers;
 mod message_handler;
 mod sender;
 
@@ -199,7 +202,7 @@ async fn send_daily_messages(
     bot: Bot,
     db: Arc<DbService>,
     interval_sec: i64,
-    data_dir: &Path,
+    data_dir: PathBuf,
     mut shutdown_signal: mpsc::Receiver<()>,
 ) -> anyhow::Result<()> {
     let now = Instant::now();
@@ -215,11 +218,7 @@ async fn send_daily_messages(
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     info!("Reading files from data dir");
-    let files = data_dir
-        .read_dir()?
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().map(|ft| ft.is_file()).unwrap_or(false))
-        .collect::<Vec<_>>();
+    let files = list_files(&data_dir)?;
 
     info!(
         "starting daily message task with interval: {}s and {} files",
@@ -301,19 +300,25 @@ fn duration_until(hour: u32, min: u32) -> Result<std::time::Duration, anyhow::Er
     Ok(res_duration.to_std()?)
 }
 
+fn get_data_dir() -> Result<PathBuf> {
+    let data_dir_str = env::var("DATA_DIR")?;
+
+    if !Path::new(&data_dir_str).is_dir() {
+        Err(anyhow!("DATA_DIR is not a directory"))?;
+    }
+
+    Ok(PathBuf::from(data_dir_str))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     pretty_env_logger::init();
 
     let db_url = &env::var("DATABASE_URL")?;
-    let data_dir_str = env::var("DATA_DIR")?;
+    let data_dir = get_data_dir()?;
     let interval: i64 = env::var("MESSAGE_INTERVAL")
         .unwrap_or("86400".to_string()) // in seconds
         .parse()?;
-
-    if !Path::new(&data_dir_str).is_dir() {
-        Err(anyhow!("DATA_DIR is not a directory"))?;
-    }
 
     let db_service = Arc::new(DbService::new_sqlite(db_url).await?);
 
@@ -328,14 +333,14 @@ async fn main() -> Result<(), anyhow::Error> {
     let send_db = db_service.clone();
     let (shutdown_send, shutdown_recv) = mpsc::channel(1);
 
-    let send_daily_message_task = tokio::spawn(async move {
-        let data_dir = Path::new(&data_dir_str);
 
+    let send_task_data_dir = data_dir.clone();
+    let send_daily_message_task = tokio::spawn(async move {
         let send_result = send_daily_messages(
             send_bot.clone(),
             send_db.clone(),
             interval,
-            data_dir,
+            send_task_data_dir,
             shutdown_recv,
         )
         .await;
@@ -349,8 +354,10 @@ async fn main() -> Result<(), anyhow::Error> {
     let recv_db = db_service.clone();
     let handler_db = db_service.clone();
 
-    let message_handler_fn =
-        move |bot: Bot, msg: Message, me: Me| message_handler(bot, msg, me, handler_db.clone());
+    let message_handler_data_dir = data_dir.clone();
+    let message_handler_fn = move |bot: Bot, msg: Message, me: Me| {
+        message_handler(bot, msg, me, handler_db.clone(), message_handler_data_dir.clone())
+    };
 
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(message_handler_fn))
