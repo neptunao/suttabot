@@ -1,7 +1,7 @@
 use crate::db::DbService;
 use crate::helpers::{list_files, MAX_RETRY_COUNT};
 use crate::make_keyboard;
-use crate::sender::{send_message, TgMessageSendError};
+use crate::sender::send_message;
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use log::warn;
@@ -12,6 +12,7 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::Me;
 use teloxide::utils::command::BotCommands;
+use log::{debug, error, info, warn};
 
 #[derive(BotCommands)]
 #[command(rename_rule = "lowercase")]
@@ -158,7 +159,7 @@ pub async fn message_handler(
                 handle_random_command(bot.clone(), msg.clone(), data_dir).await?
             }
             Err(_) => {
-                bot.send_message(msg.chat.id, "Command not found!").await?;
+                log::info!("Unknown command '{}' in chat {}", text, msg.chat.id.0);
             }
         }
     }
