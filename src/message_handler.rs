@@ -4,7 +4,6 @@ use crate::make_keyboard;
 use crate::sender::send_message;
 use anyhow::{anyhow, Result};
 use chrono::Utc;
-use log::warn;
 use rand::seq::IteratorRandom;
 use std::error::Error;
 use std::path::PathBuf;
