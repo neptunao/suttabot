@@ -198,7 +198,11 @@ pub async fn message_handler(
                 handle_random_command(bot.clone(), msg.clone(), data_dir).await?
             }
             Err(_) => {
-                log::info!("Unknown command '{}' in chat {}", text, msg.chat.id.0);
+                if text.starts_with('/') {
+                    log::info!("Unknown command '{}' in chat {}", text, msg.chat.id.0);
+                } else {
+                    log::debug!("Unknown command '{}' in chat {}", text, msg.chat.id.0);
+                }
             }
         }
     }
