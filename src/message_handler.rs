@@ -4,6 +4,7 @@ use crate::make_keyboard;
 use crate::sender::send_message;
 use anyhow::{anyhow, Result};
 use chrono::Utc;
+use log::{debug, error, info, warn};
 use rand::seq::IteratorRandom;
 use std::error::Error;
 use std::path::PathBuf;
@@ -11,7 +12,6 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::Me;
 use teloxide::utils::command::BotCommands;
-use log::{debug, error, info, warn};
 
 #[derive(BotCommands)]
 #[command(rename_rule = "lowercase")]
@@ -54,16 +54,31 @@ async fn handle_unsubscribe_command(
     match existing_subscription {
         Some(subscription) => {
             if subscription.is_enabled == 0 {
+                info!(
+                    "Chat id={} title='{}' already unsubscribed, doing nothing",
+                    chat_id,
+                    msg.chat.title().unwrap_or("")
+                );
                 bot.send_message(msg.chat.id, "Вы уже отписаны от рассылки")
                     .await?;
             } else {
                 db.set_subscription_enabled(chat_id, 0, Utc::now().timestamp())
                     .await?;
+                info!(
+                    "Chat id={} title='{}' unsubscribed",
+                    chat_id,
+                    msg.chat.title().unwrap_or("")
+                );
                 bot.send_message(msg.chat.id, "Вы отписались от рассылки")
                     .await?;
             }
         }
         None => {
+            info!(
+                "Chat id={} title='{}' is not subscribed, doing nothing",
+                chat_id,
+                msg.chat.title().unwrap_or("")
+            );
             bot.send_message(msg.chat.id, "Вы не подписаны на рассылку")
                 .await?;
         }
@@ -82,11 +97,21 @@ async fn handle_subscribe_command(
     match existing_subscription {
         Some(subscription) => {
             if subscription.is_enabled == 1 {
+                info!(
+                    "Chat id={} title='{}' already subscribed, doing nothing",
+                    chat_id,
+                    msg.chat.title().unwrap_or("")
+                );
                 bot.send_message(msg.chat.id, "Вы уже подписаны на рассылку")
                     .await?;
             } else {
                 db.set_subscription_enabled(chat_id, 1, Utc::now().timestamp())
                     .await?;
+                info!(
+                    "Chat id={} title='{}' resubscribed",
+                    chat_id,
+                    msg.chat.title().unwrap_or("")
+                );
                 bot.send_message(
                     msg.chat.id,
                     "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве",
@@ -97,6 +122,11 @@ async fn handle_subscribe_command(
         None => {
             db.create_subscription(chat_id, 1, Utc::now().timestamp())
                 .await?;
+            info!(
+                "Chat id={} title='{}' subscribed",
+                chat_id,
+                msg.chat.title().unwrap_or("")
+            );
             bot.send_message(
                 msg.chat.id,
                 "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве",
@@ -133,6 +163,16 @@ async fn handle_random_command(
             return Err(Box::new(e));
         }
     }
+
+    info!(
+        "Chat id={} title='{}' sent random message with filename={}",
+        msg.chat.id.0,
+        msg.chat.title().unwrap_or(""),
+        random_file
+            .file_name()
+            .to_str()
+            .unwrap_or("can't get filename")
+    );
 
     Ok(())
 }

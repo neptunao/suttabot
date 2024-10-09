@@ -333,7 +333,6 @@ async fn main() -> Result<(), anyhow::Error> {
     let send_db = db_service.clone();
     let (shutdown_send, shutdown_recv) = mpsc::channel(1);
 
-
     let send_task_data_dir = data_dir.clone();
     let send_daily_message_task = tokio::spawn(async move {
         let send_result = send_daily_messages(
@@ -356,7 +355,13 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let message_handler_data_dir = data_dir.clone();
     let message_handler_fn = move |bot: Bot, msg: Message, me: Me| {
-        message_handler(bot, msg, me, handler_db.clone(), message_handler_data_dir.clone())
+        message_handler(
+            bot,
+            msg,
+            me,
+            handler_db.clone(),
+            message_handler_data_dir.clone(),
+        )
     };
 
     let handler = dptree::entry()
