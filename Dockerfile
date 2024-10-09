@@ -15,6 +15,7 @@ RUN rm src/*.rs
 
 COPY ./src ./src
 COPY ./db ./db
+COPY ./.sqlx ./.sqlx
 
 RUN rm ./target/release/deps/suttabot*
 RUN cargo build --release

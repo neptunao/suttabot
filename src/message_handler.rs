@@ -26,6 +26,13 @@ enum Command {
 async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
     bot.send_message(msg.chat.id, Command::descriptions().to_string())
         .await?;
+
+    info!(
+        "Chat id={} title='{}' handled help command",
+        msg.chat.id.0,
+        msg.chat.title().unwrap_or("")
+    );
+
     Ok(())
 }
 
@@ -40,6 +47,13 @@ async fn handle_start_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Erro
     bot.send_message(msg.chat.id, "Выберите действие:")
         .reply_markup(keyboard)
         .await?;
+
+    info!(
+        "Chat id={} title='{}' handled start command",
+        msg.chat.id.0,
+        msg.chat.title().unwrap_or("")
+    );
+
     Ok(())
 }
 

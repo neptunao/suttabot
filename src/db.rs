@@ -23,8 +23,7 @@ impl DbService {
         &self,
         chat_id: i64,
     ) -> Result<Option<SubscriptionDto>, sqlx::Error> {
-        sqlx::query_as::<_, SubscriptionDto>("SELECT * FROM subscription WHERE chat_id = ?")
-            .bind(chat_id.to_string())
+        sqlx::query_as!(SubscriptionDto, r#"SELECT id, chat_id as "chat_id!: i64", is_enabled, created_at, updated_at FROM subscription WHERE chat_id = ?"#, chat_id)
             .fetch_optional(&self.pool)
             .await
     }
@@ -63,12 +62,13 @@ impl DbService {
     }
 
     pub async fn get_enabled_chat_ids(&self) -> Result<Vec<i64>, sqlx::Error> {
-        let chat_ids: Vec<(i64,)> =
-            sqlx::query_as("SELECT chat_id FROM subscription WHERE is_enabled = 1")
-                .fetch_all(&self.pool)
-                .await?;
+        let chat_ids = sqlx::query!(
+            r#"SELECT chat_id as "chat_id!: i64" FROM subscription WHERE is_enabled = 1"#
+        )
+        .fetch_all(&self.pool)
+        .await?;
 
-        let res = chat_ids.into_iter().map(|(chat_id,)| chat_id).collect();
+        let res = chat_ids.into_iter().map(|r| r.chat_id).collect();
 
         Ok(res)
     }
