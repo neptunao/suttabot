@@ -21,6 +21,7 @@ enum Command {
     Unsubscribe,
     Subscribe,
     Random,
+    SetTime,
 }
 
 async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -191,6 +192,72 @@ async fn handle_random_command(
     Ok(())
 }
 
+async fn handle_set_time_command(
+    bot: Bot,
+    msg: Message,
+    db: Arc<DbService>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let chat_id = msg.chat.id.0;
+
+    // format is 6:00 8:00 18:00
+    let times_str = msg
+        .text()
+        .unwrap()
+        .split_whitespace()
+        .skip(1)
+        .collect::<Vec<&str>>();
+
+    // now we need to translate time into integer like 08:00 is 800 and 0:00 is 0 and 1:15 is 115, returning result of vec
+    let times = times_str
+        .iter()
+        .map(|time| {
+            let time_parts = time.split(':').collect::<Vec<&str>>();
+            let hours = time_parts[0].parse::<i32>()?;
+            let minutes = time_parts[1].parse::<i32>()?;
+            Ok::<i32, anyhow::Error>(hours * 100 + minutes)
+        })
+        .collect::<Result<Vec<i32>, anyhow::Error>>()?;
+
+    let existing_subscription = db.get_subscription_by_chat_id(chat_id).await?;
+    match existing_subscription {
+        Some(subscription) => {
+            if subscription.is_enabled == 0 {
+                info!(
+                    "handle_set_time_command: Chat id={} title='{}' is not subscribed, doing nothing",
+                    chat_id,
+                    msg.chat.title().unwrap_or("")
+                );
+                bot.send_message(msg.chat.id, "Вы не подписаны на рассылку")
+                    .await?;
+            } else {
+                db.set_sendout_times(subscription.id, &times).await?;
+                info!(
+                    "handle_set_time_command: Chat id={} title='{}' set time to {:?}",
+                    chat_id,
+                    msg.chat.title().unwrap_or(""),
+                    &times
+                );
+                bot.send_message(
+                    msg.chat.id,
+                    "Время рассылки изменено. Вы будете получать новую сутту каждый день в указанное время",
+                )
+                .await?;
+            }
+        }
+        None => {
+            info!(
+                "handle_set_time_command: Chat id={} title='{}' is not subscribed, doing nothing",
+                chat_id,
+                msg.chat.title().unwrap_or("")
+            );
+            bot.send_message(msg.chat.id, "Вы не подписаны на рассылку")
+                .await?;
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn message_handler(
     bot: Bot,
     msg: Message,
@@ -210,6 +277,9 @@ pub async fn message_handler(
             }
             Ok(Command::Random) => {
                 handle_random_command(bot.clone(), msg.clone(), data_dir).await?
+            }
+            Ok(Command::SetTime) => {
+                handle_set_time_command(bot.clone(), msg.clone(), db.clone()).await?
             }
             Err(_) => {
                 if text.starts_with('/') {

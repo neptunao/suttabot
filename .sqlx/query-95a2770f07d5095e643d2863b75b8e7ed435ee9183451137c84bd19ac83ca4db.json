@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, chat_id as \"chat_id!: i64\", is_enabled, created_at, updated_at FROM subscription WHERE chat_id = ?",
+  "query": "SELECT id \"id!: i64\", chat_id as \"chat_id!: i64\", is_enabled, created_at, updated_at FROM subscription WHERE chat_id = ?",
   "describe": {
     "columns": [
       {
-        "name": "id",
+        "name": "id!: i64",
         "ordinal": 0,
         "type_info": "Integer"
       },
@@ -33,12 +33,12 @@
       "Right": 1
     },
     "nullable": [
-      false,
+      true,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "1f0570eeac87d4619b928328e3c8b3aa9e146690ec1affbd89947779eafdc86f"
+  "hash": "95a2770f07d5095e643d2863b75b8e7ed435ee9183451137c84bd19ac83ca4db"
 }
