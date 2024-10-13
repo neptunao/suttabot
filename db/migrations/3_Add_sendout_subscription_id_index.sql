@@ -1,0 +1,1 @@
+CREATE INDEX idx_sendout_times_subscription_id ON sendout_times(subscription_id);

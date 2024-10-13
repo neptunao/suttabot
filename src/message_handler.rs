@@ -218,6 +218,16 @@ async fn handle_set_time_command(
         })
         .collect::<Result<Vec<i32>, anyhow::Error>>()?;
 
+    if times.len() == 0 {
+        bot.send_message(
+            msg.chat.id,
+            "Укажите время рассылки в формате 6:00 8:18 19:31",
+        )
+        .await?;
+
+        return Ok(());
+    }
+
     if times.len() > MAX_SENDOUT_TIMES {
         bot.send_message(
             msg.chat.id,
