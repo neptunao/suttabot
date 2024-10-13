@@ -1,5 +1,5 @@
 use crate::db::DbService;
-use crate::helpers::{list_files, MAX_RETRY_COUNT};
+use crate::helpers::{list_files, MAX_RETRY_COUNT, MAX_SENDOUT_TIMES};
 use crate::make_keyboard;
 use crate::sender::send_message;
 use anyhow::{anyhow, Result};
@@ -217,6 +217,19 @@ async fn handle_set_time_command(
             Ok::<i32, anyhow::Error>(hours * 100 + minutes)
         })
         .collect::<Result<Vec<i32>, anyhow::Error>>()?;
+
+    if times.len() > MAX_SENDOUT_TIMES {
+        bot.send_message(
+            msg.chat.id,
+            format!(
+                "Максимальное количество времени рассылки - {} раз в сутки.",
+                MAX_SENDOUT_TIMES
+            ),
+        )
+        .await?;
+
+        return Ok(());
+    }
 
     let existing_subscription = db.get_subscription_by_chat_id(chat_id).await?;
     match existing_subscription {
