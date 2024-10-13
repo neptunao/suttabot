@@ -1,5 +1,4 @@
-use sqlx::{SqlitePool, Sqlite, Executor, Transaction};
-use sqlx::sqlite::SqliteExecutor;
+use sqlx::{Sqlite, SqlitePool};
 
 use crate::dto::SubscriptionDto;
 
@@ -90,10 +89,10 @@ impl DbService {
         // then we need to insert new times
         for time in times {
             sqlx::query("INSERT INTO sendout_times (subscription_id, sendout_time) VALUES (?, ?)")
-            .bind(subscription_id)
-            .bind(time)
-            .execute(&mut *transaction)
-            .await?;
+                .bind(subscription_id)
+                .bind(time)
+                .execute(&mut *transaction)
+                .await?;
         }
 
         transaction.commit().await?;
