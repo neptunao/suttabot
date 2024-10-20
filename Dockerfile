@@ -24,8 +24,9 @@ FROM gcr.io/distroless/cc-debian12
 
 ENV RUST_LOG=info
 ENV DATABASE_URL=sqlite://db/suttabot.db
-ENV DATA_DIR=/data
+ENV DATA_DIR=/data/ru
 
+COPY ./data /data
 COPY --from=builder /usr/src/app/target/release/suttabot /
 
 CMD ["./suttabot"]
