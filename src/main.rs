@@ -236,7 +236,7 @@ async fn send_daily_messages(
                 debug!("Got {} chat_ids", chat_ids.len());
 
                 for chat_id in chat_ids {
-                    match send_daily_message(&bot, chat_id, &files, make_unsubscribe_keyboard()).await {
+                    match send_daily_message(&bot, chat_id, &files).await {
                         Ok(_) => {
                             info!("Sent daily message to chat_id: {}", chat_id);
                         },
@@ -254,8 +254,8 @@ async fn send_daily_messages(
                                 retry_count += 1;
                                 error!("Failed to send message to chat_id: {}, error: {:?}, retry attempt: {}", chat_id, send_err, retry_count);
 
-                                tokio::time::sleep(retry_interval).await;
-                                success = match send_daily_message(&bot, chat_id, &files, make_unsubscribe_keyboard()).await {
+                                tokio::time::sleep(retry_interval).await; 
+                                success = match send_daily_message(&bot, chat_id, &files).await {
                                     Ok(_) => true,
                                     Err(err) => {
                                         error!("Failed to send message to chat_id: {}, error: {:?}", chat_id, err);

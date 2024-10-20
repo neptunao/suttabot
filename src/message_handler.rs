@@ -165,7 +165,7 @@ async fn handle_random_command(
         .ok_or(anyhow!("No files in data dir"))?;
     let mut retry_count = 0;
 
-    while let Err(e) = send_message(&bot, msg.chat.id.0, random_file, make_keyboard()).await {
+    while let Err(e) = send_message(&bot, msg.chat.id.0, random_file).await {
         warn!("Error sending message: {}", e);
         retry_count += 1;
         // TODO refactor duplication here

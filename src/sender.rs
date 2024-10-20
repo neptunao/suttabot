@@ -7,7 +7,6 @@ use std::fs::DirEntry;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::requests::Requester;
 use teloxide::types::ChatId;
-use teloxide::types::InlineKeyboardMarkup;
 use teloxide::types::ParseMode;
 use teloxide::RequestError;
 use thiserror::Error;
@@ -58,7 +57,6 @@ pub async fn send_daily_message(
     bot: &Bot,
     chat_id: i64,
     files: &[DirEntry],
-    keyboard: InlineKeyboardMarkup,
 ) -> Result<(), TgMessageSendError> {
     let file = files
         .iter()
@@ -66,14 +64,13 @@ pub async fn send_daily_message(
         .ok_or(anyhow!("No files in data dir"))
         .map_err(TgMessageSendError::UnknownError)?;
 
-    send_message(bot, chat_id, file, keyboard).await
+    send_message(bot, chat_id, file).await
 }
 
 pub async fn send_message(
     bot: &Bot,
     chat_id: i64,
     file: &DirEntry,
-    keyboard: InlineKeyboardMarkup,
 ) -> Result<(), TgMessageSendError> {
     let texts = fs::read_to_string(file.path())
         .map_err(|err| anyhow!("Failed to read file: {:?} error: {}", file.path(), err))
@@ -91,13 +88,9 @@ pub async fn send_message(
     );
 
     for (i, text) in texts.iter().enumerate() {
-        let mut send_msg = bot
+        let send_msg = bot
             .send_message(ChatId(chat_id), text)
             .parse_mode(ParseMode::MarkdownV2);
-
-        if i == texts.len() - 1 {
-            send_msg = send_msg.reply_markup(keyboard.clone()); // TODO bug: last message will be replaced with keyboard if unsubscribe is clicked
-        }
 
         //TODO remove previous message if second failed to send
         map_send_error(send_msg.await)?;

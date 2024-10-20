@@ -1,5 +1,5 @@
-use std::path::Path;
 use anyhow::Result;
+use std::path::Path;
 
 pub const TELEGRAM_TEXT_MAX_LENGTH: usize = 4096;
 pub const MAX_RETRY_COUNT: usize = 5;
