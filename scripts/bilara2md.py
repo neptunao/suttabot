@@ -4,6 +4,7 @@ import os
 import re
 import sys
 
+
 def split_on_j(text):
     """
     If the text contains the marker <j> (indicating a forced line break),
@@ -12,6 +13,7 @@ def split_on_j(text):
     if "<j>" in text:
         return [part.strip() for part in text.split("<j>")]
     return [text.strip()]
+
 
 def analyze_format(fmt_template):
     """
@@ -40,9 +42,10 @@ def analyze_format(fmt_template):
     else:
         mode = "paragraph"
     starts = "<p>" in tmpl
-    ends   = "</p>" in tmpl
+    ends = "</p>" in tmpl
     explicit_blockquote = "<blockquote" in tmpl
     return mode, starts, ends, explicit_blockquote
+
 
 def flush_group(group, result_lines):
     """
@@ -111,29 +114,45 @@ def flush_group(group, result_lines):
             result_lines.append(paragraph)
             result_lines.append("")
 
+
 def escape_braces(text):
     # Regex pattern for markdown links
-    markdown_link_pattern = r'\[.*?\]\(.*?\)'
+    markdown_link_pattern = r"\[.*?\]\(.*?\)"
 
     # Find all markdown links
     markdown_links = re.findall(markdown_link_pattern, text)
 
     # Replace braces with escaped braces
-    text = text.replace('{', '\\{').replace('}', '\\}').replace('[', '\\[').replace(']', '\\]').replace('(', '\\(').replace(')', '\\)')
+    text = (
+        text.replace("{", "\\{")
+        .replace("}", "\\}")
+        .replace("[", "\\[")
+        .replace("]", "\\]")
+        .replace("(", "\\(")
+        .replace(")", "\\)")
+    )
 
     # Replace escaped braces in markdown links with unescaped braces
     for link in markdown_links:
-        escaped_link = link.replace('[', '\\[').replace(']', '\\]').replace('(', '\\(').replace(')', '\\)')
+        escaped_link = (
+            link.replace("[", "\\[")
+            .replace("]", "\\]")
+            .replace("(", "\\(")
+            .replace(")", "\\)")
+        )
         text = text.replace(escaped_link, link)
 
-    text = (text.replace('`', '\\`')
-                .replace('#', '\\#')
-                .replace('.', '\\.')
-                .replace('!', '\\!')
-                .replace('=', '\\=')
-                .replace('-', '\\-'))
+    text = (
+        text.replace("`", "\\`")
+        .replace("#", "\\#")
+        .replace(".", "\\.")
+        .replace("!", "\\!")
+        .replace("=", "\\=")
+        .replace("-", "\\-")
+    )
 
     return text
+
 
 def convert_json_to_markdown(json_source_str, json_format_str):
     """
@@ -156,12 +175,14 @@ def convert_json_to_markdown(json_source_str, json_format_str):
     """
     source = json.loads(json_source_str)
     formatting = json.loads(json_format_str)
+
     # Sort keys in natural order (we assume keys have the form "something:group.seq")
     def sort_key(key):
         src, sub = key.split(":")
         splits = sub.split(".")
         group, seq = splits[0], splits[1]
         return (src, int(group), int(seq))
+
     keys = sorted(source.keys(), key=sort_key)
 
     # Build a list of entries in order. Each entry is a dict:
@@ -177,12 +198,13 @@ def convert_json_to_markdown(json_source_str, json_format_str):
             "parts": parts,
             "starts": starts,
             "ends": ends,
-            "explicit_blockquote": explicit_blockquote
+            "explicit_blockquote": explicit_blockquote,
         }
         entries.append(entry)
 
     result_lines = []
     current_group = None
+
     # Function to flush current group and reset it.
     def flush_current():
         nonlocal current_group
@@ -195,7 +217,11 @@ def convert_json_to_markdown(json_source_str, json_format_str):
         m = entry["mode"]
         if m in ("paragraph", "blockquote"):
             # If this entry explicitly starts a new paragraph, flush the current group.
-            if (current_group is None) or (current_group["mode"] != m) or entry["starts"]:
+            if (
+                (current_group is None)
+                or (current_group["mode"] != m)
+                or entry["starts"]
+            ):
                 flush_current()
                 current_group = {"mode": m, "entries": [entry]}
             else:
@@ -214,6 +240,7 @@ def convert_json_to_markdown(json_source_str, json_format_str):
 
     return escape_braces("\n".join(result_lines))
 
+
 def transform_sutta(source_path: str, format_path: str) -> str:
     try:
         with open(source_path, "r") as f:
@@ -227,6 +254,7 @@ def transform_sutta(source_path: str, format_path: str) -> str:
         print(f"Error transforming {source_path}: {e}")
         raise
 
+
 def transform_all_in_folder(source_folder: str, format_folder: str, target_folder: str):
     sutta_name_regex = re.compile(r"([a-z]+[0-9]+(\.[0-9]+)?)")
 
@@ -238,15 +266,19 @@ def transform_all_in_folder(source_folder: str, format_folder: str, target_folde
         format_file_name = f"{sutta_name}_html.json"
         source_path = os.path.join(source_folder, source_file)
         format_path = os.path.join(format_folder, format_file_name)
-        target_path = os.path.join(target_folder, source_file)
+        target_path = os.path.join(
+            target_folder, os.path.splitext(source_file)[0] + ".md"
+        )
 
         markdown = transform_sutta(source_path, format_path)
 
         with open(target_path, "w") as f:
             f.write(markdown)
 
+
 def main():
     transform_all_in_folder(sys.argv[1], sys.argv[2], "output_sc_md")
+
 
 if __name__ == "__main__":
     main()
