@@ -12,16 +12,25 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::Me;
 use teloxide::utils::command::BotCommands;
+use regex::Regex;
 
 #[derive(BotCommands)]
 #[command(rename_rule = "lowercase")]
 enum Command {
+    #[command(description = "показать это сообщение")]
     Help,
+    #[command(description = "начать работу с ботом")]
     Start,
+    #[command(description = "отписаться от рассылки")]
     Unsubscribe,
+    #[command(description = "подписаться на рассылку")]
     Subscribe,
+    #[command(description = "получить случайную сутту")]
     Random,
+    #[command(description = "установить время рассылки в формате 6:00 8:18 19:31")]
     SetTime,
+    #[command(description = "найти сутту по номеру, например: /get МН 65")]
+    Get(String),
 }
 
 async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -165,7 +174,7 @@ async fn handle_random_command(
         .ok_or(anyhow!("No files in data dir"))?;
     let mut retry_count = 0;
 
-    while let Err(e) = send_message(&bot, msg.chat.id.0, random_file).await {
+    while let Err(e) = send_message(&bot, msg.chat.id.0, random_file.path()).await {
         warn!("Error sending message: {}", e);
         retry_count += 1;
         // TODO refactor duplication here
@@ -281,6 +290,157 @@ async fn handle_set_time_command(
     Ok(())
 }
 
+// Function to find a sutta file based on a search query
+fn find_sutta_file(data_dir: &PathBuf, query: &str) -> Result<Option<PathBuf>, anyhow::Error> {
+    let files = list_files(data_dir)?;
+
+    // Normalize the query by removing spaces and converting to lowercase
+    let normalized_query = query.to_lowercase().replace(" ", "");
+
+    // Try to extract collection code and number
+    // This regex handles both formats: mn65 and sn1.10
+    let re = Regex::new(r"(?i)(mn|sn|an|dn|vv|ud|thag|thig|snp|iti|мн|сн|ан|дн|вв|уд|тхаг|тхиг|снп|ити)\s*(\d+)(?:\.(\d+))?").unwrap();
+
+    if let Some(caps) = re.captures(&normalized_query) {
+        let collection = caps.get(1).map_or("", |m| m.as_str()).to_lowercase();
+        let main_number = caps.get(2).map_or("", |m| m.as_str());
+        let sub_number = caps.get(3).map_or("", |m| m.as_str());
+
+        // Convert Russian abbreviations to English
+        let collection_en = match collection.as_str() {
+            "мн" => "mn",
+            "сн" => "sn",
+            "ан" => "an",
+            "дн" => "dn",
+            "вв" => "vv",
+            "уд" => "ud",
+            "тхаг" => "thag",
+            "тхиг" => "thig",
+            "снп" => "snp",
+            "ити" => "iti",
+            _ => collection.as_str(),
+        };
+
+        // Create different possible formats for the filename
+        let mut patterns = Vec::new();
+
+        // Handle cases like mn65
+        if sub_number.is_empty() {
+            patterns.push(format!("{}{}", collection_en, main_number));
+            patterns.push(format!("{}_{}", collection_en, main_number));
+            patterns.push(format!("{}.{}", collection_en, main_number));
+        }
+        // Handle cases like sn1.10
+        else {
+            patterns.push(format!("{}{}.{}", collection_en, main_number, sub_number));
+            patterns.push(format!("{}{}_{}", collection_en, main_number, sub_number));
+            patterns.push(format!("{}{}_{}_", collection_en, main_number, sub_number)); // For cases like sn1_10_smth
+            patterns.push(format!("{}{}-{}", collection_en, main_number, sub_number));
+        }
+
+        // First, try exact matches
+        for file in &files {
+            let filename = file.file_name().to_string_lossy().to_lowercase();
+
+            for pattern in &patterns {
+                if filename.contains(pattern) {
+                    return Ok(Some(file.path()));
+                }
+            }
+
+            // Check for range files like sn35.195-197.md
+            if !sub_number.is_empty() {
+                let sub_num: i32 = sub_number.parse().unwrap_or(0);
+
+                // Look for ranges that might include this number
+                let range_re = Regex::new(&format!(r"{}{}\.(\d+)-(\d+)", collection_en, main_number)).unwrap();
+                if let Some(range_caps) = range_re.captures(&filename) {
+                    let start_num: i32 = range_caps.get(1).map_or("0", |m| m.as_str()).parse().unwrap_or(0);
+                    let end_num: i32 = range_caps.get(2).map_or("0", |m| m.as_str()).parse().unwrap_or(0);
+
+                    if sub_num >= start_num && sub_num <= end_num {
+                        return Ok(Some(file.path()));
+                    }
+                }
+            }
+        }
+
+        // If no exact match, try fuzzy match
+        for file in &files {
+            let filename = file.file_name().to_string_lossy().to_lowercase();
+
+            if filename.contains(collection_en) {
+                if sub_number.is_empty() {
+                    if filename.contains(main_number) {
+                        return Ok(Some(file.path()));
+                    }
+                } else {
+                    if filename.contains(main_number) && filename.contains(sub_number) {
+                        return Ok(Some(file.path()));
+                    }
+                }
+            }
+        }
+    }
+
+    // If no match found with regex, try a more general fuzzy search
+    for file in &files {
+        let filename = file.file_name().to_string_lossy().to_lowercase();
+        if filename.contains(&normalized_query) {
+            return Ok(Some(file.path()));
+        }
+    }
+
+    Ok(None)
+}
+
+// Handler for the get command
+async fn handle_get_command(
+    bot: Bot,
+    msg: Message,
+    query: String,
+    data_dir: PathBuf,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    if query.is_empty() {
+        bot.send_message(
+            msg.chat.id,
+            "Пожалуйста, укажите название сутты для поиска, например: /get МН 65",
+        )
+        .await?;
+        return Ok(());
+    }
+
+    match find_sutta_file(&data_dir, &query) {
+        Ok(Some(file_path)) => {
+            info!(
+                "Chat id={} title='{}' found and sending sutta with filename={}",
+                msg.chat.id.0,
+                msg.chat.title().unwrap_or(""),
+                file_path.file_name().unwrap_or_default().to_string_lossy()
+            );
+
+            send_message(&bot, msg.chat.id.0, file_path.clone()).await?;
+        },
+        Ok(None) => {
+            bot.send_message(
+                msg.chat.id,
+                format!("Сутта '{}' не найдена.", query),
+            )
+            .await?;
+        },
+        Err(e) => {
+            warn!("Error searching for sutta: {}", e);
+            bot.send_message(
+                msg.chat.id,
+                "Произошла ошибка при поиске сутты.",
+            )
+            .await?;
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn message_handler(
     bot: Bot,
     msg: Message,
@@ -299,10 +459,13 @@ pub async fn message_handler(
                 handle_subscribe_command(bot.clone(), msg.clone(), db.clone()).await?
             }
             Ok(Command::Random) => {
-                handle_random_command(bot.clone(), msg.clone(), data_dir).await?
+                handle_random_command(bot.clone(), msg.clone(), data_dir.clone()).await?
             }
             Ok(Command::SetTime) => {
                 handle_set_time_command(bot.clone(), msg.clone(), db.clone()).await?
+            }
+            Ok(Command::Get(query)) => {
+                handle_get_command(bot.clone(), msg.clone(), query, data_dir.clone()).await?
             }
             Err(_) => {
                 if text.starts_with('/') {

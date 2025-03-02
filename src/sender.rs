@@ -4,6 +4,7 @@ use log::{debug, error, info};
 use rand::seq::IteratorRandom;
 use std::fs;
 use std::fs::DirEntry;
+use std::path::PathBuf;
 use teloxide::payloads::SendMessageSetters;
 use teloxide::requests::Requester;
 use teloxide::types::ChatId;
@@ -64,16 +65,16 @@ pub async fn send_daily_message(
         .ok_or(anyhow!("No files in data dir"))
         .map_err(TgMessageSendError::UnknownError)?;
 
-    send_message(bot, chat_id, file).await
+    send_message(bot, chat_id, file.path()).await
 }
 
 pub async fn send_message(
     bot: &Bot,
     chat_id: i64,
-    file: &DirEntry,
+    file: PathBuf,
 ) -> Result<(), TgMessageSendError> {
-    let texts = fs::read_to_string(file.path())
-        .map_err(|err| anyhow!("Failed to read file: {:?} error: {}", file.path(), err))
+    let texts = fs::read_to_string(file.clone())
+        .map_err(|err| anyhow!("Failed to read file: {:?} error: {}", file.clone(), err))
         .map_err(TgMessageSendError::UnknownError)?
         .chars()
         .collect::<Vec<char>>()
@@ -84,10 +85,10 @@ pub async fn send_message(
     info!(
         "Sending message to chat_id: {}, filename: {}",
         chat_id,
-        file.file_name().to_string_lossy()
+        file.file_name().unwrap_or_default().to_string_lossy()
     );
 
-    for (i, text) in texts.iter().enumerate() {
+    for (_i, text) in texts.iter().enumerate() {
         let send_msg = bot
             .send_message(ChatId(chat_id), text)
             .parse_mode(ParseMode::MarkdownV2);
