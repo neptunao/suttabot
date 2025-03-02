@@ -65,10 +65,10 @@ pub async fn send_daily_message(
         .ok_or(anyhow!("No files in data dir"))
         .map_err(TgMessageSendError::UnknownError)?;
 
-    send_message(bot, chat_id, file.path()).await
+    send_file_text_to_chat(bot, chat_id, file.path()).await
 }
 
-pub async fn send_message(
+pub async fn send_file_text_to_chat(
     bot: &Bot,
     chat_id: i64,
     file: PathBuf,
@@ -88,7 +88,7 @@ pub async fn send_message(
         file.file_name().unwrap_or_default().to_string_lossy()
     );
 
-    for (_i, text) in texts.iter().enumerate() {
+    for text in texts.iter() {
         let send_msg = bot
             .send_message(ChatId(chat_id), text)
             .parse_mode(ParseMode::MarkdownV2);

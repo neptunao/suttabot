@@ -1,18 +1,18 @@
 use crate::db::DbService;
 use crate::helpers::{list_files, MAX_RETRY_COUNT, MAX_SENDOUT_TIMES};
 use crate::make_keyboard;
-use crate::sender::send_message;
+use crate::sender::send_file_text_to_chat;
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use log::{info, warn};
 use rand::seq::IteratorRandom;
+use regex::Regex;
 use std::error::Error;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::Me;
 use teloxide::utils::command::BotCommands;
-use regex::Regex;
 
 #[derive(BotCommands)]
 #[command(rename_rule = "lowercase")]
@@ -174,7 +174,7 @@ async fn handle_random_command(
         .ok_or(anyhow!("No files in data dir"))?;
     let mut retry_count = 0;
 
-    while let Err(e) = send_message(&bot, msg.chat.id.0, random_file.path()).await {
+    while let Err(e) = send_file_text_to_chat(&bot, msg.chat.id.0, random_file.path()).await {
         warn!("Error sending message: {}", e);
         retry_count += 1;
         // TODO refactor duplication here
@@ -211,7 +211,7 @@ async fn handle_set_time_command(
     // format is 6:00 8:00 18:00
     let times_str = msg
         .text()
-        .unwrap()
+        .unwrap_or("8:00")
         .split_whitespace()
         .skip(1)
         .collect::<Vec<&str>>();
@@ -227,7 +227,7 @@ async fn handle_set_time_command(
         })
         .collect::<Result<Vec<i32>, anyhow::Error>>()?;
 
-    if times.len() == 0 {
+    if times.is_empty() {
         bot.send_message(
             msg.chat.id,
             "Укажите время рассылки в формате 6:00 8:18 19:31",
@@ -291,7 +291,7 @@ async fn handle_set_time_command(
 }
 
 // Function to find a sutta file based on a search query
-fn find_sutta_file(data_dir: &PathBuf, query: &str) -> Result<Option<PathBuf>, anyhow::Error> {
+fn find_sutta_file(data_dir: &Path, query: &str) -> Result<Option<PathBuf>, anyhow::Error> {
     let files = list_files(data_dir)?;
 
     // Normalize the query by removing spaces and converting to lowercase
@@ -303,40 +303,26 @@ fn find_sutta_file(data_dir: &PathBuf, query: &str) -> Result<Option<PathBuf>, a
 
     if let Some(caps) = re.captures(&normalized_query) {
         let collection = caps.get(1).map_or("", |m| m.as_str()).to_lowercase();
-        let main_number = caps.get(2).map_or("", |m| m.as_str());
-        let sub_number = caps.get(3).map_or("", |m| m.as_str());
+        let main_number: i32 = caps
+            .get(2)
+            .ok_or(anyhow!("Main number not provided"))?
+            .as_str()
+            .parse()
+            .map_err(|_| anyhow!("Failed to convert main number to integer"))?;
 
-        // Convert Russian abbreviations to English
-        let collection_en = match collection.as_str() {
-            "мн" => "mn",
-            "сн" => "sn",
-            "ан" => "an",
-            "дн" => "dn",
-            "вв" => "vv",
-            "уд" => "ud",
-            "тхаг" => "thag",
-            "тхиг" => "thig",
-            "снп" => "snp",
-            "ити" => "iti",
-            _ => collection.as_str(),
-        };
+        let sub_number: Option<i32> = caps
+            .get(3)
+            .map(|m| {
+                m.as_str()
+                    .parse()
+                    .map_err(|_| anyhow!("Failed to convert sub number to integer"))
+            })
+            .transpose()?;
+
+        let collection_en = ru_code_to_en(&collection);
 
         // Create different possible formats for the filename
-        let mut patterns = Vec::new();
-
-        // Handle cases like mn65
-        if sub_number.is_empty() {
-            patterns.push(format!("{}{}", collection_en, main_number));
-            patterns.push(format!("{}_{}", collection_en, main_number));
-            patterns.push(format!("{}.{}", collection_en, main_number));
-        }
-        // Handle cases like sn1.10
-        else {
-            patterns.push(format!("{}{}.{}", collection_en, main_number, sub_number));
-            patterns.push(format!("{}{}_{}", collection_en, main_number, sub_number));
-            patterns.push(format!("{}{}_{}_", collection_en, main_number, sub_number)); // For cases like sn1_10_smth
-            patterns.push(format!("{}{}-{}", collection_en, main_number, sub_number));
-        }
+        let patterns = filename_patterns(main_number, sub_number, &collection_en);
 
         // First, try exact matches
         for file in &files {
@@ -348,53 +334,144 @@ fn find_sutta_file(data_dir: &PathBuf, query: &str) -> Result<Option<PathBuf>, a
                 }
             }
 
-            // Check for range files like sn35.195-197.md
-            if !sub_number.is_empty() {
-                let sub_num: i32 = sub_number.parse().unwrap_or(0);
-
-                // Look for ranges that might include this number
-                let range_re = Regex::new(&format!(r"{}{}\.(\d+)-(\d+)", collection_en, main_number)).unwrap();
-                if let Some(range_caps) = range_re.captures(&filename) {
-                    let start_num: i32 = range_caps.get(1).map_or("0", |m| m.as_str()).parse().unwrap_or(0);
-                    let end_num: i32 = range_caps.get(2).map_or("0", |m| m.as_str()).parse().unwrap_or(0);
-
-                    if sub_num >= start_num && sub_num <= end_num {
-                        return Ok(Some(file.path()));
-                    }
-                }
+            if let Some(value) =
+                find_in_ranged_suttas(main_number, sub_number, &collection_en, file, filename)?
+            {
+                return Ok(Some(value));
             }
         }
 
         // If no exact match, try fuzzy match
-        for file in &files {
-            let filename = file.file_name().to_string_lossy().to_lowercase();
-
-            if filename.contains(collection_en) {
-                if sub_number.is_empty() {
-                    if filename.contains(main_number) {
-                        return Ok(Some(file.path()));
-                    }
-                } else {
-                    if filename.contains(main_number) && filename.contains(sub_number) {
-                        return Ok(Some(file.path()));
-                    }
-                }
-            }
-        }
-    }
-
-    // If no match found with regex, try a more general fuzzy search
-    for file in &files {
-        let filename = file.file_name().to_string_lossy().to_lowercase();
-        if filename.contains(&normalized_query) {
-            return Ok(Some(file.path()));
+        if let Some(value) = fuzzy_search_sutta(files, main_number, sub_number, collection_en)? {
+            return Ok(Some(value));
         }
     }
 
     Ok(None)
 }
 
-// Handler for the get command
+fn filename_patterns(
+    main_number: i32,
+    sub_number: Option<i32>,
+    collection_en: &String,
+) -> Vec<String> {
+    let mut patterns = Vec::new();
+
+    match sub_number {
+        None => {
+            patterns.push(format!("{}{}", collection_en, main_number)); // e.g. mn65
+        }
+        Some(sub_num) => {
+            // e.g. sn1.10
+            patterns.push(format!("{}{}.{}", collection_en, main_number, sub_num));
+            // e.g. sn1_10
+            patterns.push(format!("{}{}_{}", collection_en, main_number, sub_num));
+        }
+    }
+
+    patterns
+}
+
+fn fuzzy_search_sutta(
+    files: Vec<std::fs::DirEntry>,
+    main_number: i32,
+    sub_number: Option<i32>,
+    collection_en: String,
+) -> Result<Option<PathBuf>, anyhow::Error> {
+    // If no exact match, try fuzzy match
+    for file in &files {
+        let filename = file.file_name().to_string_lossy().to_lowercase();
+
+        // Skip files that don't contain the collection code
+        if !filename.contains(&collection_en) {
+            continue;
+        }
+
+        // Skip files that don't contain the main number
+        if !filename.contains(&main_number.to_string()) {
+            continue;
+        }
+
+        // If there is no sub-number, return immediately, e.g. mn65
+        if sub_number.is_none() {
+            return Ok(Some(file.path()));
+        }
+
+        // For files with sub-number, check if it's present
+        if let Some(sub_num) = sub_number {
+            if filename.contains(&sub_num.to_string()) {
+                return Ok(Some(file.path()));
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+fn find_in_ranged_suttas(
+    main_number: i32,
+    sub_number: Option<i32>,
+    collection_en: &String,
+    file: &std::fs::DirEntry,
+    filename: String,
+) -> Result<Option<PathBuf>, anyhow::Error> {
+    let sub_num = match sub_number {
+        Some(num) => num,
+        None => return Ok(None),
+    };
+
+    // Check for range files like sn35.195-197.md
+    // Create regex to match patterns like "sn35.195-197" or "sn35_195-197"
+    let range_pattern = format!(r"{}{}[\.-_](\d+)-(\d+)", collection_en, main_number);
+
+    let range_re =
+        Regex::new(&range_pattern).map_err(|e| anyhow!("Error creating range regex: {}", e))?;
+
+    // Try to find and extract the range from the filename
+    let range_caps = match range_re.captures(&filename) {
+        Some(caps) => caps,
+        None => return Ok(None),
+    };
+
+    // Parse the start and end numbers of the range
+    let start_num: i32 = range_caps
+        .get(1)
+        .map_or("0", |m| m.as_str())
+        .parse()
+        .unwrap_or(0);
+
+    let end_num: i32 = range_caps
+        .get(2)
+        .map_or("0", |m| m.as_str())
+        .parse()
+        .unwrap_or(0);
+
+    // Check if the sub_num is within the range
+    if sub_num >= start_num && sub_num <= end_num {
+        return Ok(Some(file.path()));
+    }
+
+    Ok(None)
+}
+
+fn ru_code_to_en(collection: &str) -> String {
+    let collection_en = match collection {
+        "мн" => "mn",
+        "сн" => "sn",
+        "ан" => "an",
+        "дн" => "dn",
+        "вв" => "vv",
+        "уд" => "ud",
+        "тхаг" => "thag",
+        "тхиг" => "thig",
+        "снп" => "snp",
+        "ити" => "iti",
+        _ => collection,
+    };
+
+    collection_en.to_string()
+}
+
 async fn handle_get_command(
     bot: Bot,
     msg: Message,
@@ -413,28 +490,23 @@ async fn handle_get_command(
     match find_sutta_file(&data_dir, &query) {
         Ok(Some(file_path)) => {
             info!(
-                "Chat id={} title='{}' found and sending sutta with filename={}",
+                "Chat id={} title='{}' found and sending sutta with filename={} by query={}",
                 msg.chat.id.0,
                 msg.chat.title().unwrap_or(""),
-                file_path.file_name().unwrap_or_default().to_string_lossy()
+                file_path.file_name().unwrap_or_default().to_string_lossy(),
+                query
             );
 
-            send_message(&bot, msg.chat.id.0, file_path.clone()).await?;
-        },
+            send_file_text_to_chat(&bot, msg.chat.id.0, file_path.clone()).await?;
+        }
         Ok(None) => {
-            bot.send_message(
-                msg.chat.id,
-                format!("Сутта '{}' не найдена.", query),
-            )
-            .await?;
-        },
+            bot.send_message(msg.chat.id, format!("Сутта '{}' не найдена.", query))
+                .await?;
+        }
         Err(e) => {
             warn!("Error searching for sutta: {}", e);
-            bot.send_message(
-                msg.chat.id,
-                "Произошла ошибка при поиске сутты.",
-            )
-            .await?;
+            bot.send_message(msg.chat.id, "Произошла ошибка при поиске сутты.")
+                .await?;
         }
     }
 
