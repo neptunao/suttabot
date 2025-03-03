@@ -12,5 +12,5 @@ anyhow = "1.0.95"
 sqlx = { version = "0.8.3", features = [ "runtime-tokio", "sqlite" ] }
 chrono = "0.4.39"
 rand = "0.8.5"
-thiserror = "2.0.11"
+thiserror = "2.0.12"
 regex = "1.11.1"
