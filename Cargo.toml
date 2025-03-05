@@ -5,12 +5,12 @@ edition = "2021"
 
 [dependencies]
 teloxide = { version = "0.12.2", features = ["macros", "auto-send"] }
-log = "0.4.22"
+log = "0.4.26"
 pretty_env_logger = "0.5.0"
 tokio = { version =  "1.43.0", features = ["rt-multi-thread", "macros"] }
-anyhow = "1.0.95"
+anyhow = "1.0.97"
 sqlx = { version = "0.8.3", features = [ "runtime-tokio", "sqlite" ] }
 chrono = "0.4.39"
-rand = "0.8.5"
+rand = "0.9.0"
 thiserror = "2.0.12"
 regex = "1.11.1"
