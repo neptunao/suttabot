@@ -48,8 +48,8 @@ def to_telegram_markdown(text):
     # Fix unclosed markdown formatting
     lines = text.split('\n')
     for i, line in enumerate(lines):
-        # Fix unclosed bold/italic text (asterisks)
-        if line.count('*') % 2 != 0:
+        # Fix unclosed bold/italic text (asterisks) in the first 3 lines, since after they are used for bullet points
+        if i < 3 and line.count('*') % 2 != 0:
             # Check if line starts with an asterisk but doesn't end with one
             if line.startswith('*') and not line.endswith('*'):
                 lines[i] = line + '*'
@@ -59,6 +59,11 @@ def to_telegram_markdown(text):
             # Otherwise, just add an asterisk at the end
             else:
                 lines[i] = line + '*'
+
+        # Replace bullet points (asterisks) with hyphens after the first 3 lines
+        if i >= 3 and line.strip().startswith('*') and not line.strip().startswith('**'):
+            # Replace the first asterisk with a hyphen
+            lines[i] = line.replace('*', '\\-', 1)
 
         # Fix unclosed italic text (single underscore)
         if line.count('_') % 2 != 0:

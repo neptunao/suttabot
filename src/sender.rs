@@ -73,14 +73,11 @@ pub async fn send_file_text_to_chat(
     chat_id: i64,
     file: PathBuf,
 ) -> Result<(), TgMessageSendError> {
-    let texts = fs::read_to_string(file.clone())
+    let content = fs::read_to_string(file.clone())
         .map_err(|err| anyhow!("Failed to read file: {:?} error: {}", file.clone(), err))
-        .map_err(TgMessageSendError::UnknownError)?
-        .chars()
-        .collect::<Vec<char>>()
-        .chunks(TELEGRAM_TEXT_MAX_LENGTH)
-        .map(|chunk| chunk.iter().collect::<String>())
-        .collect::<Vec<String>>();
+        .map_err(TgMessageSendError::UnknownError)?;
+
+    let texts = chunk_text(content);
 
     info!(
         "Sending message to chat_id: {}, filename: {}",
@@ -98,4 +95,34 @@ pub async fn send_file_text_to_chat(
     }
 
     Ok(())
+}
+
+fn chunk_text(content: String) -> Vec<String> {
+    // Create chunks that don't break escape sequences
+    let mut texts = Vec::new();
+    let mut current_chunk = String::new();
+
+    for c in content.chars() {
+        // If adding this character would exceed the limit
+        if current_chunk.len() + 1 > TELEGRAM_TEXT_MAX_LENGTH {
+            // If the last character is a backslash, remove it and save it for the next chunk
+            if current_chunk.ends_with('\\') {
+                let len = current_chunk.len();
+                let without_backslash = &current_chunk[..len - 1];
+                texts.push(without_backslash.to_string());
+                current_chunk = String::from('\\');
+            } else {
+                texts.push(current_chunk);
+                current_chunk = String::new();
+            }
+        }
+
+        current_chunk.push(c);
+    }
+
+    // Don't forget the last chunk
+    if !current_chunk.is_empty() {
+        texts.push(current_chunk);
+    }
+    texts
 }
