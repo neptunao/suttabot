@@ -23,7 +23,7 @@ def filter_by_text(text):
 
     return True
 
-def escape_braces(text):
+def to_telegram_markdown(text):
     # Regex pattern for markdown links
     markdown_link_pattern = r'\[.*?\]\(.*?\)'
 
@@ -45,7 +45,41 @@ def escape_braces(text):
                 .replace('=', '\\=')
                 .replace('-', '\\-'))
 
-    return text
+    # Fix unclosed markdown formatting
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        # Fix unclosed bold/italic text (asterisks)
+        if line.count('*') % 2 != 0:
+            # Check if line starts with an asterisk but doesn't end with one
+            if line.startswith('*') and not line.endswith('*'):
+                lines[i] = line + '*'
+            # Check if line ends with an asterisk but doesn't start with one
+            elif line.endswith('*') and not line.startswith('*'):
+                lines[i] = '*' + line
+            # Otherwise, just add an asterisk at the end
+            else:
+                lines[i] = line + '*'
+
+        # Fix unclosed italic text (single underscore)
+        if line.count('_') % 2 != 0:
+            # Check if line starts with an underscore but doesn't end with one
+            if line.startswith('_') and not line.endswith('_'):
+                lines[i] = line + '_'
+            # Check if line ends with an underscore but doesn't start with one
+            elif line.endswith('_') and not line.startswith('_'):
+                lines[i] = '_' + line
+            # Otherwise, just add an underscore at the end
+            else:
+                lines[i] = line + '_'
+
+        # Fix unclosed bold text (double underscore)
+        # Count pairs of double underscores
+        double_underscore_count = line.count('__')
+        if double_underscore_count % 2 != 0:
+            # If there's an odd number of double underscores, add one more at the end
+            lines[i] = line + '__'
+
+    return '\n'.join(lines)
 
 def html_to_md(source_folder, target_folder):
     os.makedirs(target_folder, exist_ok=True)
@@ -65,7 +99,7 @@ def html_to_md(source_folder, target_folder):
                     continue
 
                 with open(target_file, 'w') as f:
-                    f.write(escape_braces(md_content))
+                    f.write(to_telegram_markdown(md_content))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Convert HTML files to Markdown.')

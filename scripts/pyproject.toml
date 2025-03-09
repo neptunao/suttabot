@@ -1,0 +1,20 @@
+[project]
+name = "suttabot-scripts"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Alexander Ryabets",email = "naeptunao@gmail.com"}
+]
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    "markdownify (>=1.1.0,<2.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+package-mode = false
