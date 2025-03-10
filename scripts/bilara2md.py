@@ -167,7 +167,7 @@ def convert_json_to_markdown(json_source_str, json_format_str):
         src, sub = key.split(":")
         splits = sub.split(".")
         group, seq = splits[0], splits[1]
-        return (src, int(group), int(seq))
+        return (src, group, int(seq))
 
     keys = sorted(source.keys(), key=sort_key)
 
