@@ -24,7 +24,7 @@ def analyze_format(fmt_template):
       etc.)
     and decide:
       - the mode: one of "header", "blockquote", "paragraph"
-      - whether this key’s formatting opens a paragraph (contains "<p>")
+      - whether this key's formatting opens a paragraph (contains "<p>")
       - whether it closes one (contains "</p>")
       - whether it explicitly uses a blockquote (i.e. if it contains "<blockquote")
 
@@ -69,7 +69,7 @@ def flush_group(group, result_lines):
     mode = group["mode"]
     entries = group["entries"]
     if mode == "paragraph":
-        # Join all entries’ parts with a space.
+        # Join all entries' parts with a space.
         paragraph = " ".join(" ".join(entry["parts"]) for entry in entries)
         if paragraph:
             result_lines.append(paragraph)
@@ -77,29 +77,15 @@ def flush_group(group, result_lines):
     elif mode == "blockquote":
         # Determine if the first entry explicitly included a blockquote.
         explicit = entries[0]["explicit_blockquote"]
-        if explicit:
-            # Simply output every text fragment with "> " prefix.
-            for entry in entries:
-                for part in entry["parts"]:
-                    if part:
-                        result_lines.append(f"> {part}")
-        else:
-            # Otherwise, if more than one entry is grouped, output the first entry,
-            # then a blank blockquote line, then the remaining entries.
-            if len(entries) == 1:
-                for part in entries[0]["parts"]:
-                    if part:
-                        result_lines.append(f"> {part}")
-            else:
-                for part in entries[0]["parts"]:
-                    if part:
-                        result_lines.append(f"> {part}")
-                result_lines.append(">")  # blank blockquote line
-                for entry in entries[1:]:
-                    for part in entry["parts"]:
-                        if part:
-                            result_lines.append(f"> {part}")
-        # result_lines.append("")
+
+        # Add all verse lines with "> " prefix
+        for entry in entries:
+            for part in entry["parts"]:
+                if part:
+                    result_lines.append(f"> {part}")
+
+        # Add an empty line after the blockquote
+        result_lines.append("")
     elif mode == "header":
         # (Headers are not grouped; they are processed individually.)
         for entry in entries:
@@ -161,7 +147,7 @@ def convert_json_to_markdown(json_source_str, json_format_str):
       • obtain the source text and split it on any "<j>"
       • obtain the corresponding formatting template and analyze it
       • then we group consecutive entries that are of the same mode and that belong
-        to the same “paragraph” (that is, if the formatting template shows an opening <p>
+        to the same "paragraph" (that is, if the formatting template shows an opening <p>
         then that starts a new group; if it shows a closing </p> then that group is flushed).
 
     The actual markdown output is produced as follows:
@@ -277,7 +263,7 @@ def transform_all_in_folder(source_folder: str, format_folder: str, target_folde
 
 
 def main():
-    transform_all_in_folder(sys.argv[1], sys.argv[2], "output_sc_md")
+    transform_all_in_folder(sys.argv[1], sys.argv[2], sys.argv[3])
 
 
 if __name__ == "__main__":
