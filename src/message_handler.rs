@@ -1,7 +1,7 @@
 use crate::db::DbService;
 use crate::helpers::{list_files, MAX_RETRY_COUNT, MAX_SENDOUT_TIMES};
 use crate::make_keyboard;
-use crate::sender::send_file_text_to_chat;
+use crate::sender::{send_file_text_to_chat, send_audio_file_to_chat};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use log::{info, warn};
@@ -13,6 +13,7 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::Me;
 use teloxide::utils::command::BotCommands;
+use std::ffi::OsStr;
 
 #[derive(BotCommands)]
 #[command(rename_rule = "lowercase")]
@@ -31,6 +32,8 @@ enum Command {
     SetTime,
     #[command(description = "найти сутту по номеру, например: /get МН 65")]
     Get(String),
+    #[command(description = "получить аудиофайл сутты, например: /audio МН 1")]
+    Audio(String),
 }
 
 async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -290,168 +293,35 @@ async fn handle_set_time_command(
     Ok(())
 }
 
-// Function to find a sutta file based on a search query
-fn find_sutta_file(data_dir: &Path, query: &str) -> Result<Option<PathBuf>, anyhow::Error> {
-    let files = list_files(data_dir)?;
+#[derive(Debug, PartialEq)]
+struct SuttaIdentifier {
+    collection: String,
+    main_number: i32,
+    sub_number: Option<String>, // Keep as string to preserve exact format
+}
 
-    // Normalize the query by removing spaces and converting to lowercase
+fn parse_sutta_identifier(query: &str) -> Result<Option<SuttaIdentifier>, anyhow::Error> {
     let normalized_query = query.to_lowercase().replace(" ", "");
+    let re = Regex::new(r"(?i)(mn|sn|an|dn|vv|ud|thag|thig|snp|iti|мн|сн|ан|дн|вв|уд|тхаг|тхиг|снп|ити)\s*(\d+)(?:\.(\d+))?")?;
 
-    // Try to extract collection code and number
-    // This regex handles both formats: mn65 and sn1.10
-    let re = Regex::new(r"(?i)(mn|sn|an|dn|vv|ud|thag|thig|snp|iti|мн|сн|ан|дн|вв|уд|тхаг|тхиг|снп|ити)\s*(\d+)(?:\.(\d+))?").unwrap();
-
-    if let Some(caps) = re.captures(&normalized_query) {
-        let collection = caps.get(1).map_or("", |m| m.as_str()).to_lowercase();
-        let main_number: i32 = caps
-            .get(2)
-            .ok_or(anyhow!("Main number not provided"))?
-            .as_str()
-            .parse()
-            .map_err(|_| anyhow!("Failed to convert main number to integer"))?;
-
-        let sub_number: Option<i32> = caps
-            .get(3)
-            .map(|m| {
-                m.as_str()
-                    .parse()
-                    .map_err(|_| anyhow!("Failed to convert sub number to integer"))
-            })
-            .transpose()?;
-
-        let collection_en = ru_code_to_en(&collection);
-
-        // Create different possible formats for the filename
-        let patterns = filename_patterns(main_number, sub_number, &collection_en);
-
-        // First, try exact matches
-        for file in &files {
-            let filename = file.file_name().to_string_lossy().to_lowercase();
-
-            for pattern in &patterns {
-                if filename.contains(pattern) {
-                    return Ok(Some(file.path()));
-                }
-            }
-
-            if let Some(value) =
-                find_in_ranged_suttas(main_number, sub_number, &collection_en, file, filename)?
-            {
-                return Ok(Some(value));
-            }
-        }
-
-        // If no exact match, try fuzzy match
-        if let Some(value) = fuzzy_search_sutta(files, main_number, sub_number, collection_en)? {
-            return Ok(Some(value));
-        }
-    }
-
-    Ok(None)
-}
-
-fn filename_patterns(
-    main_number: i32,
-    sub_number: Option<i32>,
-    collection_en: &String,
-) -> Vec<String> {
-    let mut patterns = Vec::new();
-
-    match sub_number {
-        None => {
-            patterns.push(format!("{}{}", collection_en, main_number)); // e.g. mn65
-        }
-        Some(sub_num) => {
-            // e.g. sn1.10
-            patterns.push(format!("{}{}.{}", collection_en, main_number, sub_num));
-            // e.g. sn1_10
-            patterns.push(format!("{}{}_{}", collection_en, main_number, sub_num));
-        }
-    }
-
-    patterns
-}
-
-fn fuzzy_search_sutta(
-    files: Vec<std::fs::DirEntry>,
-    main_number: i32,
-    sub_number: Option<i32>,
-    collection_en: String,
-) -> Result<Option<PathBuf>, anyhow::Error> {
-    // If no exact match, try fuzzy match
-    for file in &files {
-        let filename = file.file_name().to_string_lossy().to_lowercase();
-
-        // Skip files that don't contain the collection code
-        if !filename.contains(&collection_en) {
-            continue;
-        }
-
-        // Skip files that don't contain the main number
-        if !filename.contains(&main_number.to_string()) {
-            continue;
-        }
-
-        // If there is no sub-number, return immediately, e.g. mn65
-        if sub_number.is_none() {
-            return Ok(Some(file.path()));
-        }
-
-        // For files with sub-number, check if it's present
-        if let Some(sub_num) = sub_number {
-            if filename.contains(&sub_num.to_string()) {
-                return Ok(Some(file.path()));
-            }
-        }
-    }
-
-    Ok(None)
-}
-
-fn find_in_ranged_suttas(
-    main_number: i32,
-    sub_number: Option<i32>,
-    collection_en: &String,
-    file: &std::fs::DirEntry,
-    filename: String,
-) -> Result<Option<PathBuf>, anyhow::Error> {
-    let sub_num = match sub_number {
-        Some(num) => num,
+    let caps = match re.captures(&normalized_query) {
+        Some(c) => c,
         None => return Ok(None),
     };
 
-    // Check for range files like sn35.195-197.md
-    // Create regex to match patterns like "sn35.195-197" or "sn35_195-197"
-    let range_pattern = format!(r"{}{}[\.-_](\d+)-(\d+)", collection_en, main_number);
-
-    let range_re =
-        Regex::new(&range_pattern).map_err(|e| anyhow!("Error creating range regex: {}", e))?;
-
-    // Try to find and extract the range from the filename
-    let range_caps = match range_re.captures(&filename) {
-        Some(caps) => caps,
-        None => return Ok(None),
-    };
-
-    // Parse the start and end numbers of the range
-    let start_num: i32 = range_caps
-        .get(1)
-        .map_or("0", |m| m.as_str())
-        .parse()
-        .unwrap_or(0);
-
-    let end_num: i32 = range_caps
+    let collection = caps.get(1).map_or("", |m| m.as_str()).to_lowercase();
+    let main_number: i32 = caps
         .get(2)
-        .map_or("0", |m| m.as_str())
-        .parse()
+        .map(|m| m.as_str().parse().unwrap_or(0))
         .unwrap_or(0);
+    let sub_number = caps.get(3).map(|m| m.as_str().to_string());
+    let collection_en = ru_code_to_en(&collection);
 
-    // Check if the sub_num is within the range
-    if sub_num >= start_num && sub_num <= end_num {
-        return Ok(Some(file.path()));
-    }
-
-    Ok(None)
+    Ok(Some(SuttaIdentifier {
+        collection: collection_en,
+        main_number,
+        sub_number,
+    }))
 }
 
 fn ru_code_to_en(collection: &str) -> String {
@@ -470,6 +340,39 @@ fn ru_code_to_en(collection: &str) -> String {
     };
 
     collection_en.to_string()
+}
+
+fn matches_sutta_identifier(filename: &str, sutta: &SuttaIdentifier) -> bool {
+    let filename = filename.to_lowercase();
+    let audio_extensions = ["mp3", "ogg", "wav", "m4a", "flac"];
+    let filename_no_ext = match filename.rsplit_once('.') {
+        Some((name, ext)) if audio_extensions.contains(&ext) => name,
+        _ => filename.as_str(),
+    };
+    let pattern = match &sutta.sub_number {
+        Some(sub) => format!("{}{}.{}", sutta.collection, sutta.main_number, sub),
+        None => format!("{}{}", sutta.collection, sutta.main_number),
+    };
+    filename_no_ext == pattern
+}
+
+fn find_audio_by_sutta_name(
+    audio_files: &[std::fs::DirEntry],
+    query: &str,
+) -> Result<Option<PathBuf>, anyhow::Error> {
+    let sutta = match parse_sutta_identifier(query)? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+
+    for file in audio_files {
+        let filename = file.file_name().to_string_lossy().to_string();
+        if matches_sutta_identifier(&filename, &sutta) {
+            return Ok(Some(file.path()));
+        }
+    }
+
+    Ok(None)
 }
 
 async fn handle_get_command(
@@ -513,6 +416,106 @@ async fn handle_get_command(
     Ok(())
 }
 
+fn get_audio_files(audio_dir: &Path) -> Result<Vec<std::fs::DirEntry>, anyhow::Error> {
+    let audio_extensions = ["mp3", "ogg", "wav", "m4a", "flac"];
+    let files = list_files(audio_dir)?;
+
+    // Helper to check extension
+    let is_audio = |file: &std::fs::DirEntry| {
+        file.path()
+            .extension()
+            .and_then(OsStr::to_str)
+            .map(|ext| audio_extensions.contains(&ext))
+            .unwrap_or(false)
+    };
+
+    Ok(files.into_iter().filter(|f| is_audio(f)).collect())
+}
+
+fn get_random_audio_file(audio_files: &[std::fs::DirEntry]) -> Option<PathBuf> {
+    audio_files
+        .iter()
+        .choose(&mut rand::rng())
+        .map(|f| f.path())
+}
+
+async fn handle_audio_command(
+    bot: Bot,
+    msg: Message,
+    query: String,
+    data_dir: PathBuf,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let audio_dir = data_dir.join("audio");
+
+    // Get list of audio files
+    let audio_files = match get_audio_files(&audio_dir) {
+        Ok(files) => files,
+        Err(e) => {
+            log::error!("Error listing audio files: {}", e);
+            bot.send_message(msg.chat.id, "Ошибка при отправке аудиофайла.").await?;
+            return Ok(());
+        }
+    };
+
+    if audio_files.is_empty() {
+        log::warn!("Audio files dir is empty");
+        bot.send_message(msg.chat.id, "Ошибка при отправке аудиофайла.").await?;
+        return Ok(());
+    }
+
+    // Find audio file to send
+    let file_to_send = if query.trim().is_empty() {
+        get_random_audio_file(&audio_files)
+    } else {
+        match find_audio_by_sutta_name(&audio_files, &query) {
+            Ok(Some(path)) => Some(path),
+            Ok(None) => None,
+            Err(e) => {
+                log::error!("Error finding audio file: {}", e);
+                None
+            }
+        }
+    };
+
+    // Send the audio file
+    match file_to_send {
+        Some(path) => {
+            info!(
+                "Chat id={} title='{}' sending audio with filename={}",
+                msg.chat.id.0,
+                msg.chat.title().unwrap_or(""),
+                path.file_name().unwrap_or_default().to_string_lossy()
+            );
+            if let Err(e) = send_audio_file_to_chat(&bot, msg.chat.id.0, path.clone()).await {
+                warn!("Error sending audio: {}", e);
+                bot.send_message(msg.chat.id, "Ошибка при отправке аудиофайла.").await?;
+            }
+        }
+        None => {
+            bot.send_message(msg.chat.id, "Аудиофайл не найден.").await?;
+        }
+    }
+
+    Ok(())
+}
+
+fn find_sutta_file(data_dir: &Path, query: &str) -> Result<Option<PathBuf>, anyhow::Error> {
+    let files = list_files(data_dir)?;
+    let sutta = match parse_sutta_identifier(query)? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+
+    for file in &files {
+        let filename = file.file_name().to_string_lossy().to_string();
+        if matches_sutta_identifier(&filename, &sutta) {
+            return Ok(Some(file.path()));
+        }
+    }
+
+    Ok(None)
+}
+
 pub async fn message_handler(
     bot: Bot,
     msg: Message,
@@ -539,6 +542,9 @@ pub async fn message_handler(
             Ok(Command::Get(query)) => {
                 handle_get_command(bot.clone(), msg.clone(), query, data_dir.clone()).await?
             }
+            Ok(Command::Audio(query)) => {
+                handle_audio_command(bot.clone(), msg.clone(), query, data_dir.clone()).await?
+            }
             Err(_) => {
                 if text.starts_with('/') {
                     log::info!("Unknown command '{}' in chat {}", text, msg.chat.id.0);
@@ -550,4 +556,100 @@ pub async fn message_handler(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_sutta_identifier() -> Result<(), anyhow::Error> {
+        // Test basic parsing
+        assert_eq!(
+            parse_sutta_identifier("an6.5")?,
+            Some(SuttaIdentifier {
+                collection: "an".to_string(),
+                main_number: 6,
+                sub_number: Some("5".to_string()),
+            })
+        );
+
+        // Test with spaces
+        assert_eq!(
+            parse_sutta_identifier("an 6.5")?,
+            Some(SuttaIdentifier {
+                collection: "an".to_string(),
+                main_number: 6,
+                sub_number: Some("5".to_string()),
+            })
+        );
+
+        // Test without sub-number
+        assert_eq!(
+            parse_sutta_identifier("mn1")?,
+            Some(SuttaIdentifier {
+                collection: "mn".to_string(),
+                main_number: 1,
+                sub_number: None,
+            })
+        );
+
+        // Test Russian collection codes
+        assert_eq!(
+            parse_sutta_identifier("ан6.5")?,
+            Some(SuttaIdentifier {
+                collection: "an".to_string(),
+                main_number: 6,
+                sub_number: Some("5".to_string()),
+            })
+        );
+
+        // Test invalid formats
+        assert_eq!(parse_sutta_identifier("invalid")?, None);
+        assert_eq!(parse_sutta_identifier("an")?, None);
+        assert_eq!(parse_sutta_identifier("an.")?, None);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_matches_sutta_identifier() {
+        // Test AN6.5
+        let an6_5 = SuttaIdentifier {
+            collection: "an".to_string(),
+            main_number: 6,
+            sub_number: Some("5".to_string()),
+        };
+        assert!(matches_sutta_identifier("an6.5", &an6_5));
+        assert!(matches_sutta_identifier("an6.5.mp3", &an6_5));
+        assert!(!matches_sutta_identifier("an6.50", &an6_5));  // Different sub-number
+        assert!(!matches_sutta_identifier("an6.51", &an6_5));  // Different sub-number
+
+        // Test MN1 (no sub-number)
+        let mn1 = SuttaIdentifier {
+            collection: "mn".to_string(),
+            main_number: 1,
+            sub_number: None,
+        };
+        assert!(matches_sutta_identifier("mn1", &mn1));
+        assert!(matches_sutta_identifier("mn1.mp3", &mn1));
+        assert!(!matches_sutta_identifier("mn1.1", &mn1));  // Different sutta (has sub-number)
+        assert!(!matches_sutta_identifier("mn1.1.mp3", &mn1));  // Different sutta (has sub-number)
+
+        // Test SN1.10
+        let sn1_10 = SuttaIdentifier {
+            collection: "sn".to_string(),
+            main_number: 1,
+            sub_number: Some("10".to_string()),
+        };
+        assert!(matches_sutta_identifier("sn1.10", &sn1_10));
+        assert!(matches_sutta_identifier("sn1.10.mp3", &sn1_10));
+        assert!(!matches_sutta_identifier("an1.10", &sn1_10));  // Different collection
+        assert!(!matches_sutta_identifier("mn1.10", &sn1_10));  // Different collection
+
+        // Test case insensitivity
+        assert!(matches_sutta_identifier("AN6.5", &an6_5));
+        assert!(matches_sutta_identifier("An6.5", &an6_5));
+        assert!(matches_sutta_identifier("an6.5", &an6_5));
+    }
 }

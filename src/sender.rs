@@ -13,6 +13,7 @@ use teloxide::RequestError;
 use thiserror::Error;
 
 use teloxide::Bot;
+use teloxide::types::InputFile;
 
 use crate::helpers::TELEGRAM_TEXT_MAX_LENGTH;
 
@@ -93,6 +94,23 @@ pub async fn send_file_text_to_chat(
         //TODO remove previous message if second failed to send
         map_send_error(send_msg.await)?;
     }
+
+    Ok(())
+}
+
+pub async fn send_audio_file_to_chat(
+    bot: &Bot,
+    chat_id: i64,
+    file: PathBuf,
+) -> Result<(), TgMessageSendError> {
+    info!(
+        "Sending audio to chat_id: {}, filename: {}",
+        chat_id,
+        file.file_name().unwrap_or_default().to_string_lossy()
+    );
+
+    let send_audio = bot.send_audio(ChatId(chat_id), InputFile::file(file));
+    map_send_error(send_audio.await)?;
 
     Ok(())
 }
