@@ -1,20 +1,22 @@
 use crate::db::DbService;
 use crate::helpers::{list_files, MAX_RETRY_COUNT, MAX_SENDOUT_TIMES};
-use crate::make_keyboard;
 use crate::sender::send_file_text_to_chat;
+use crate::scheduler::ScheduleManager;
+use crate::time_utils::parse_time_to_utc_minutes;
+use crate::keyboards;
 use anyhow::{anyhow, Result};
 use chrono::Utc;
-use log::{info, warn};
+use log::{info, warn, error};
 use rand::seq::IteratorRandom;
 use regex::Regex;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use teloxide::prelude::*;
-use teloxide::types::Me;
+use teloxide::types::{Me, InlineKeyboardMarkup};
 use teloxide::utils::command::BotCommands;
 
-#[derive(BotCommands)]
+#[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase")]
 enum Command {
     #[command(description = "показать это сообщение")]
@@ -27,9 +29,9 @@ enum Command {
     Subscribe,
     #[command(description = "получить случайную сутту")]
     Random,
-    #[command(description = "установить время рассылки в формате 6:00 8:18 19:31")]
-    SetTime,
-    #[command(description = "найти сутту по номеру, например: /get МН 65")]
+    #[command(description = "установить время рассылки. Формат: ЧЧ:ММ или ЧЧ:ММ UTC+/-ЧЧ:ММ. Можно несколько через пробел.")]
+    SetTime(String),
+    #[command(description = "найти сутту по названию, например: /get МН 65")]
     Get(String),
 }
 
@@ -53,7 +55,7 @@ async fn handle_start_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Erro
     )
     .await?;
 
-    let keyboard = make_keyboard();
+    let keyboard = keyboards::make_keyboard();
     bot.send_message(msg.chat.id, "Выберите действие:")
         .reply_markup(keyboard)
         .await?;
@@ -204,51 +206,57 @@ async fn handle_random_command(
 async fn handle_set_time_command(
     bot: Bot,
     msg: Message,
+    text_args: String,
     db: Arc<DbService>,
+    schedule_manager: Arc<ScheduleManager>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let chat_id = msg.chat.id.0;
 
-    // format is 6:00 8:00 18:00
-    let times_str = msg
-        .text()
-        .unwrap_or("8:00")
-        .split_whitespace()
-        .skip(1)
-        .collect::<Vec<&str>>();
+    let time_inputs_str = text_args.split_whitespace().collect::<Vec<&str>>();
 
-    // now we need to translate time into integer like 08:00 is 800 and 0:00 is 0 and 1:15 is 115, returning result of vec
-    let times = times_str
-        .iter()
-        .map(|time| {
-            let time_parts = time.split(':').collect::<Vec<&str>>();
-            let hours = time_parts[0].parse::<i32>()?;
-            let minutes = time_parts[1].parse::<i32>()?;
-            Ok::<i32, anyhow::Error>(hours * 100 + minutes)
-        })
-        .collect::<Result<Vec<i32>, anyhow::Error>>()?;
-
-    if times.is_empty() {
+    if time_inputs_str.is_empty() {
         bot.send_message(
             msg.chat.id,
-            "Укажите время рассылки в формате 6:00 8:18 19:31",
+            "Укажите время рассылки в формате ЧЧ:ММ или ЧЧ:ММ UTC+/-ЧЧ:ММ. Например: /settime 08:00 14:30 UTC+02:00",
         )
         .await?;
-
         return Ok(());
     }
 
-    if times.len() > MAX_SENDOUT_TIMES {
+    if time_inputs_str.len() > MAX_SENDOUT_TIMES {
         bot.send_message(
             msg.chat.id,
             format!(
-                "Максимальное количество времени рассылки - {} раз в сутки.",
+                "Максимальное количество настроек времени рассылки - {} раз в сутки.",
                 MAX_SENDOUT_TIMES
             ),
         )
         .await?;
-
         return Ok(());
     }
+
+    let mut new_utc_times: Vec<i32> = Vec::new();
+    for time_input in time_inputs_str {
+        match parse_time_to_utc_minutes(time_input) {
+            Ok(utc_minute) => new_utc_times.push(utc_minute),
+            Err(e) => {
+                bot.send_message(
+                    msg.chat.id,
+                    format!(
+                        "Ошибка парсинга времени '{}': {}.\nФормат: ЧЧ:ММ или ЧЧ:ММ UTC+/-ЧЧ:ММ",
+                        time_input,
+                        e
+                    ),
+                )
+                .await?;
+                return Ok(());
+            }
+        }
+    }
+
+    // Deduplicate times to avoid issues if user enters the same time twice
+    new_utc_times.sort_unstable();
+    new_utc_times.dedup();
 
     let existing_subscription = db.get_subscription_by_chat_id(chat_id).await?;
     match existing_subscription {
@@ -259,19 +267,26 @@ async fn handle_set_time_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, "Вы не подписаны на рассылку")
+                bot.send_message(msg.chat.id, "Вы не подписаны на рассылку. Сначала подпишитесь.")
                     .await?;
             } else {
-                db.set_sendout_times(subscription.id, &times).await?;
+                db.set_sendout_times(subscription.id, &new_utc_times).await?;
                 info!(
-                    "handle_set_time_command: Chat id={} title='{}' set time to {:?}",
+                    "handle_set_time_command: Chat id={} title='{}' set time to UTC minutes: {:?}",
                     chat_id,
                     msg.chat.title().unwrap_or(""),
-                    &times
+                    &new_utc_times
                 );
+
+                // Trigger schedule refresh
+                if let Err(e) = schedule_manager.refresh().await {
+                    error!("Failed to refresh schedule after /settime: {}", e);
+                    // Inform user about success, but log error for admin.
+                }
+
                 bot.send_message(
                     msg.chat.id,
-                    "Время рассылки изменено. Вы будете получать новую сутту каждый день в указанное время",
+                    "Время рассылки изменено. Новые настройки активны.",
                 )
                 .await?;
             }
@@ -282,7 +297,7 @@ async fn handle_set_time_command(
                 chat_id,
                 msg.chat.title().unwrap_or("")
             );
-            bot.send_message(msg.chat.id, "Вы не подписаны на рассылку")
+            bot.send_message(msg.chat.id, "Вы не подписаны на рассылку. Сначала подпишитесь.")
                 .await?;
         }
     }
@@ -519,6 +534,7 @@ pub async fn message_handler(
     me: Me,
     db: Arc<DbService>,
     data_dir: PathBuf,
+    schedule_manager: Arc<ScheduleManager>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(text) = msg.text() {
         match BotCommands::parse(text, me.username()) {
@@ -533,8 +549,8 @@ pub async fn message_handler(
             Ok(Command::Random) => {
                 handle_random_command(bot.clone(), msg.clone(), data_dir.clone()).await?
             }
-            Ok(Command::SetTime) => {
-                handle_set_time_command(bot.clone(), msg.clone(), db.clone()).await?
+            Ok(Command::SetTime(text_args)) => {
+                handle_set_time_command(bot.clone(), msg.clone(), text_args, db.clone(), schedule_manager.clone()).await?
             }
             Ok(Command::Get(query)) => {
                 handle_get_command(bot.clone(), msg.clone(), query, data_dir.clone()).await?

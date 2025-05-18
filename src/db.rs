@@ -1,4 +1,4 @@
-use sqlx::{Sqlite, SqlitePool};
+use sqlx::{Sqlite, SqlitePool, Transaction};
 
 use crate::dto::SubscriptionDto;
 
@@ -34,14 +34,31 @@ impl DbService {
         is_enabled: i32,
         timestamp: i64,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("INSERT INTO subscription (chat_id, is_enabled, created_at, updated_at) VALUES (?, ?, ?, ?)")
+        let mut transaction = self.pool.begin().await?;
+
+        sqlx::query(
+            "INSERT INTO subscription (chat_id, is_enabled, created_at, updated_at) VALUES (?, ?, ?, ?)",
+        )
         .bind(chat_id.to_string())
         .bind(is_enabled)
         .bind(timestamp)
         .bind(timestamp)
-        .execute(&self.pool)
+        .execute(&mut *transaction)
         .await?;
 
+        let subscription_row: (i64,) = sqlx::query_as("SELECT last_insert_rowid()")
+            .fetch_one(&mut *transaction)
+            .await?;
+        let subscription_id = subscription_row.0;
+
+        let default_utc_send_minute = 300;
+        sqlx::query("INSERT INTO sendout_times (subscription_id, sendout_time) VALUES (?, ?)")
+            .bind(subscription_id)
+            .bind(default_utc_send_minute)
+            .execute(&mut *transaction)
+            .await?;
+
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -61,36 +78,22 @@ impl DbService {
         Ok(())
     }
 
-    pub async fn get_enabled_chat_ids(&self) -> Result<Vec<i64>, sqlx::Error> {
-        let chat_ids = sqlx::query!(
-            r#"SELECT chat_id as "chat_id!: i64" FROM subscription WHERE is_enabled = 1"#
-        )
-        .fetch_all(&self.pool)
-        .await?;
-
-        let res = chat_ids.into_iter().map(|r| r.chat_id).collect();
-
-        Ok(res)
-    }
-
     pub async fn set_sendout_times(
         &self,
         subscription_id: i64,
-        times: &[i32],
+        times_utc_minutes: &[i32],
     ) -> Result<(), sqlx::Error> {
         let mut transaction: sqlx::Transaction<'_, Sqlite> = self.pool.begin().await?;
 
-        // first we need to delete all existing times
         sqlx::query("DELETE FROM sendout_times WHERE subscription_id = ?")
             .bind(subscription_id)
             .execute(&mut *transaction)
             .await?;
 
-        // then we need to insert new times
-        for time in times {
+        for time_utc_minute in times_utc_minutes {
             sqlx::query("INSERT INTO sendout_times (subscription_id, sendout_time) VALUES (?, ?)")
                 .bind(subscription_id)
-                .bind(time)
+                .bind(time_utc_minute)
                 .execute(&mut *transaction)
                 .await?;
         }
@@ -98,5 +101,19 @@ impl DbService {
         transaction.commit().await?;
 
         Ok(())
+    }
+
+    pub async fn get_all_active_schedules(&self) -> Result<Vec<(i64, i32)>, sqlx::Error> {
+        let results = sqlx::query_as::<_, (i64, i32)>(
+            r#"
+            SELECT s.chat_id, st.sendout_time
+            FROM subscription s
+            JOIN sendout_times st ON s.id = st.subscription_id
+            WHERE s.is_enabled = 1
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(results)
     }
 }
