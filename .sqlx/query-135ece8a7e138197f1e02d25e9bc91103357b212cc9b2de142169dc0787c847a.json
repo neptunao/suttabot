@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id \"id!: i64\", chat_id as \"chat_id!: i64\", is_enabled, created_at, updated_at FROM subscription WHERE chat_id = ?",
+  "query": "SELECT id as \"id!: i64\", chat_id as \"chat_id!: i64\", is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count\n            FROM subscription\n            WHERE is_enabled = 1 AND (strftime('%s', 'now') - last_donation_reminder) >= 1296000",
   "describe": {
     "columns": [
       {
@@ -27,18 +27,30 @@
         "name": "updated_at",
         "ordinal": 4,
         "type_info": "Integer"
+      },
+      {
+        "name": "last_donation_reminder",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "donation_reminder_count",
+        "ordinal": 6,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 0
     },
     "nullable": [
       true,
       false,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "95a2770f07d5095e643d2863b75b8e7ed435ee9183451137c84bd19ac83ca4db"
+  "hash": "135ece8a7e138197f1e02d25e9bc91103357b212cc9b2de142169dc0787c847a"
 }
