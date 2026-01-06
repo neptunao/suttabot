@@ -23,7 +23,7 @@ impl DbService {
         &self,
         chat_id: i64,
     ) -> Result<Option<SubscriptionDto>, sqlx::Error> {
-        sqlx::query_as!(SubscriptionDto, r#"SELECT id "id!: i64", chat_id as "chat_id!: i64", is_enabled, created_at, updated_at FROM subscription WHERE chat_id = ?"#, chat_id)
+        sqlx::query_as!(SubscriptionDto, r#"SELECT id "id!: i64", chat_id as "chat_id!: i64", is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count FROM subscription WHERE chat_id = ?"#, chat_id)
             .fetch_optional(&self.pool)
             .await
     }
@@ -34,11 +34,18 @@ impl DbService {
         is_enabled: i32,
         timestamp: i64,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query("INSERT INTO subscription (chat_id, is_enabled, created_at, updated_at) VALUES (?, ?, ?, ?)")
+        // Set last_donation_reminder to 14 days ago (UTC) so user gets reminder with first daily message
+        let last_donation_reminder = timestamp - 1_209_600; // 14 days in seconds
+
+        sqlx::query(
+            "INSERT INTO subscription (chat_id, is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count) VALUES (?, ?, ?, ?, ?, ?)"
+        )
         .bind(chat_id.to_string())
         .bind(is_enabled)
         .bind(timestamp)
         .bind(timestamp)
+        .bind(last_donation_reminder)
+        .bind(0)
         .execute(&self.pool)
         .await?;
 
@@ -98,5 +105,35 @@ impl DbService {
         transaction.commit().await?;
 
         Ok(())
+    }
+
+    pub async fn update_donation_reminder(
+        &self,
+        chat_id: i64,
+        timestamp: i64,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE subscription SET last_donation_reminder = ?, donation_reminder_count = donation_reminder_count + 1, updated_at = ? WHERE chat_id = ?"
+        )
+        .bind(timestamp)
+        .bind(timestamp)
+        .bind(chat_id.to_string())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn get_subscriptions_for_donation_reminder(
+        &self,
+    ) -> Result<Vec<SubscriptionDto>, sqlx::Error> {
+        sqlx::query_as!(
+            SubscriptionDto,
+            r#"SELECT id as "id!: i64", chat_id as "chat_id!: i64", is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count
+            FROM subscription
+            WHERE is_enabled = 1 AND (strftime('%s', 'now') - last_donation_reminder) >= 1296000"#
+        )
+        .fetch_all(&self.pool)
+        .await
     }
 }

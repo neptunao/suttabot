@@ -31,6 +31,8 @@ enum Command {
     SetTime,
     #[command(description = "найти сутту по номеру, например: /get МН 65")]
     Get(String),
+    #[command(description = "информация о поддержке Дхамма-центров")]
+    Dana,
 }
 
 async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -43,6 +45,36 @@ async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error
         msg.chat.title().unwrap_or("")
     );
 
+    Ok(())
+}
+
+async fn handle_dana_command(
+    bot: Bot,
+    msg: Message,
+    db: Arc<DbService>,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use crate::helpers::DONATION_FILE_PATH;
+
+    // Send donation info WITHOUT a sutta
+    let donation_file = PathBuf::from(DONATION_FILE_PATH);
+
+    if let Err(e) = send_file_text_to_chat(&bot, msg.chat.id.0, donation_file).await {
+        log::error!("Failed to send donation info to chat_id={}: {:?}", msg.chat.id, e);
+        return Err(Box::new(e));
+    }
+
+    // Bump reminder counter and timestamp (UTC)
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| anyhow::anyhow!("System time error: {}", e))?
+        .as_secs() as i64;
+
+    if let Err(e) = db.update_donation_reminder(msg.chat.id.0, timestamp).await {
+        log::error!("Failed to update donation reminder for chat_id={}: {:?}", msg.chat.id, e);
+    }
+
+    info!("Chat id={} handled dana command", msg.chat.id.0);
     Ok(())
 }
 
@@ -538,6 +570,9 @@ pub async fn message_handler(
             }
             Ok(Command::Get(query)) => {
                 handle_get_command(bot.clone(), msg.clone(), query, data_dir.clone()).await?
+            }
+            Ok(Command::Dana) => {
+                handle_dana_command(bot.clone(), msg.clone(), db.clone()).await?
             }
             Err(_) => {
                 if text.starts_with('/') {

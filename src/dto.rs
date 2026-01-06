@@ -5,4 +5,6 @@ pub struct SubscriptionDto {
     pub is_enabled: i64,
     pub created_at: i64,
     pub updated_at: i64,
+    pub last_donation_reminder: i64,
+    pub donation_reminder_count: i64,
 }

@@ -16,8 +16,7 @@ use tokio::sync::mpsc;
 use tokio::time::{interval_at, Instant};
 
 use crate::message_handler::message_handler;
-use crate::sender::send_daily_message;
-use crate::sender::TgMessageSendError;
+use crate::sender::{send_daily_message, send_file_text_to_chat, TgMessageSendError};
 
 mod db;
 mod dto;
@@ -235,38 +234,56 @@ async fn send_daily_messages(
                 let chat_ids = db.get_enabled_chat_ids().await?;
                 debug!("Got {} chat_ids", chat_ids.len());
 
+                // Query eligible users for donation reminder
+                let eligible_for_donation = db.get_subscriptions_for_donation_reminder().await?;
+                let eligible_chat_ids: std::collections::HashSet<i64> =
+                    eligible_for_donation.iter().map(|s| s.chat_id).collect();
+                debug!("Got {} chat_ids eligible for donation reminder", eligible_chat_ids.len());
+
                 for chat_id in chat_ids {
-                    match send_daily_message(&bot, chat_id, &files).await {
-                        Ok(_) => {
-                            info!("Sent daily message to chat_id: {}", chat_id);
-                        },
-                        Err(send_err) => {
-                            let (is_recoverable, mut retry_interval) = can_retry_error_with_interval(&send_err);
-                            if !is_recoverable {
-                                error!("Failed to send message to chat_id: {}, error: {:?}", chat_id, send_err);
-                                continue;
-                            }
+                    // send message and optionally donation reminder
+                    if let Err(err) = send_daily_and_maybe_donation(
+                        &bot,
+                        &db,
+                        chat_id,
+                        &files,
+                        &eligible_chat_ids,
+                    )
+                    .await
+                    {
+                        let (is_recoverable, mut retry_interval) = can_retry_error_with_interval(&err);
+                        if !is_recoverable {
+                            error!("Failed to send message to chat_id: {}, error: {:?}", chat_id, err);
+                            continue;
+                        }
 
-                            let mut retry_count = 0;
-                            let mut success = false;
+                        let mut retry_count = 0;
+                        let mut success = false;
 
-                            while !success && retry_count < RETRY_LIMIT {
-                                retry_count += 1;
-                                error!("Failed to send message to chat_id: {}, error: {:?}, retry attempt: {}", chat_id, send_err, retry_count);
+                        while !success && retry_count < RETRY_LIMIT {
+                            retry_count += 1;
+                            error!("Failed to send message to chat_id: {}, error: {:?}, retry attempt: {}", chat_id, err, retry_count);
 
-                                tokio::time::sleep(retry_interval).await; 
-                                success = match send_daily_message(&bot, chat_id, &files).await {
-                                    Ok(_) => true,
-                                    Err(err) => {
-                                        error!("Failed to send message to chat_id: {}, error: {:?}", chat_id, err);
-                                        false
-                                    }
-                                };
-                                retry_interval *= 2; // exponential backoff
-
-                                if retry_count == RETRY_LIMIT {
-                                    error!("Failed to send message to chat_id: {} after {} attempts", chat_id, RETRY_LIMIT);
+                            tokio::time::sleep(retry_interval).await;
+                            success = match send_daily_and_maybe_donation(
+                                &bot,
+                                &db,
+                                chat_id,
+                                &files,
+                                &eligible_chat_ids,
+                            )
+                            .await
+                            {
+                                Ok(_) => true,
+                                Err(err) => {
+                                    error!("Failed to send message to chat_id: {}, error: {:?}", chat_id, err);
+                                    false
                                 }
+                            };
+                            retry_interval *= 2; // exponential backoff
+
+                            if retry_count == RETRY_LIMIT {
+                                error!("Failed to send message to chat_id: {} after {} attempts", chat_id, RETRY_LIMIT);
                             }
                         }
                     }
@@ -275,6 +292,42 @@ async fn send_daily_messages(
             _ = shutdown_signal.recv() => {
                 println!("Shutting down daily message task");
                 break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn send_daily_and_maybe_donation(
+    bot: &Bot,
+    db: &Arc<DbService>,
+    chat_id: i64,
+    files: &Vec<std::fs::DirEntry>,
+    eligible_chat_ids: &std::collections::HashSet<i64>,
+) -> Result<(), TgMessageSendError> {
+    // Send the daily sutta
+    send_daily_message(bot, chat_id, files.as_slice()).await?;
+
+    // If eligible, send donation info (after the sutta)
+    if eligible_chat_ids.contains(&chat_id) {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        use crate::helpers::DONATION_FILE_PATH;
+
+        let donation_file = PathBuf::from(DONATION_FILE_PATH);
+
+        send_file_text_to_chat(bot, chat_id, donation_file).await?;
+
+        // Update timestamp and counter in DB (use UTC)
+        match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => {
+                let timestamp = duration.as_secs() as i64;
+                if let Err(e) = db.update_donation_reminder(chat_id, timestamp).await {
+                    log::error!("Failed to update donation reminder for chat_id={}: {:?}", chat_id, e);
+                }
+            }
+            Err(e) => {
+                log::error!("System time error for chat_id={}: {}", chat_id, e);
             }
         }
     }
