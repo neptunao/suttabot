@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id as \"id!: i64\", chat_id as \"chat_id!: i64\", is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count, sendout_count\n            FROM subscription\n            WHERE is_enabled = 1 AND sendout_count % ? = 0",
+  "describe": {
+    "columns": [
+      {
+        "name": "id!: i64",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "chat_id!: i64",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "is_enabled",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "updated_at",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_donation_reminder",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "donation_reminder_count",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "sendout_count",
+        "ordinal": 7,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "de2c21c5c663855b731f37b052c37e8438282fb4ef659714876081020eae0eb3"
+}

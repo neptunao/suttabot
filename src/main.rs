@@ -69,6 +69,7 @@ async fn callback_handler(
     db: Arc<DbService>,
     bot: Bot,
     q: CallbackQuery,
+    donation_period: i64,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(chosen_action) = &q.data {
         if let Some(chat_id) = q.chat_id() {
@@ -119,7 +120,9 @@ async fn callback_handler(
                         None => {
                             info!("Inserting new subscription for chat_id: {}", chat_id);
 
-                            db.create_subscription(chat_id.0, 1, timestamp).await?;
+                            let initial_sendout = if donation_period > 0 { donation_period - 1 } else { 0 };
+
+                            db.create_subscription(chat_id.0, 1, timestamp, initial_sendout).await?;
 
                             let text = "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве";
 
@@ -202,6 +205,7 @@ async fn send_daily_messages(
     db: Arc<DbService>,
     interval_sec: i64,
     data_dir: PathBuf,
+    donation_period: i64,
     mut shutdown_signal: mpsc::Receiver<()>,
 ) -> anyhow::Result<()> {
     let now = Instant::now();
@@ -234,12 +238,6 @@ async fn send_daily_messages(
                 let chat_ids = db.get_enabled_chat_ids().await?;
                 debug!("Got {} chat_ids", chat_ids.len());
 
-                // Query eligible users for donation reminder
-                let eligible_for_donation = db.get_subscriptions_for_donation_reminder().await?;
-                let eligible_chat_ids: std::collections::HashSet<i64> =
-                    eligible_for_donation.iter().map(|s| s.chat_id).collect();
-                debug!("Got {} chat_ids eligible for donation reminder", eligible_chat_ids.len());
-
                 for chat_id in chat_ids {
                     // send message and optionally donation reminder
                     if let Err(err) = send_daily_and_maybe_donation(
@@ -247,7 +245,7 @@ async fn send_daily_messages(
                         &db,
                         chat_id,
                         &files,
-                        &eligible_chat_ids,
+                        donation_period,
                     )
                     .await
                     {
@@ -270,7 +268,7 @@ async fn send_daily_messages(
                                 &db,
                                 chat_id,
                                 &files,
-                                &eligible_chat_ids,
+                                donation_period,
                             )
                             .await
                             {
@@ -304,13 +302,22 @@ async fn send_daily_and_maybe_donation(
     db: &Arc<DbService>,
     chat_id: i64,
     files: &Vec<std::fs::DirEntry>,
-    eligible_chat_ids: &std::collections::HashSet<i64>,
+    donation_period: i64,
 ) -> Result<(), TgMessageSendError> {
     // Send the daily sutta
     send_daily_message(bot, chat_id, files.as_slice()).await?;
 
-    // If eligible, send donation info (after the sutta)
-    if eligible_chat_ids.contains(&chat_id) {
+    // Increment sendout_count (happens for EVERY daily sutta sent)
+    let new_count = match db.increment_sendout_count(chat_id).await {
+        Ok(count) => count,
+        Err(e) => {
+            log::error!("Failed to increment sendout_count for chat_id={}: {:?}", chat_id, e);
+            return Ok(()); // Continue even if DB update fails
+        }
+    };
+
+    // Check if we should send donation message (count % period == 0)
+    if new_count % donation_period == 0 {
         use std::time::{SystemTime, UNIX_EPOCH};
         use crate::helpers::DONATION_FILE_PATH;
 
@@ -318,18 +325,20 @@ async fn send_daily_and_maybe_donation(
 
         send_file_text_to_chat(bot, chat_id, donation_file).await?;
 
-        // Update timestamp and counter in DB (use UTC)
+        // Update tracking fields (timestamp and counter)
         match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(duration) => {
                 let timestamp = duration.as_secs() as i64;
                 if let Err(e) = db.update_donation_reminder(chat_id, timestamp).await {
-                    log::error!("Failed to update donation reminder for chat_id={}: {:?}", chat_id, e);
+                    log::error!("Failed to update donation tracking for chat_id={}: {:?}", chat_id, e);
                 }
             }
             Err(e) => {
                 log::error!("System time error for chat_id={}: {}", chat_id, e);
             }
         }
+
+        info!("Sent donation message to chat_id={} (count={})", chat_id, new_count);
     }
 
     Ok(())
@@ -372,6 +381,9 @@ async fn main() -> Result<(), anyhow::Error> {
     let interval: i64 = env::var("MESSAGE_INTERVAL")
         .unwrap_or("86400".to_string()) // in seconds
         .parse()?;
+    let donation_period: i64 = env::var("DONATION_MESSAGE_PERIOD")
+        .unwrap_or("15".to_string()) // send donation every 15 messages
+        .parse()?;
 
     let db_service = Arc::new(DbService::new_sqlite(db_url).await?);
 
@@ -393,6 +405,7 @@ async fn main() -> Result<(), anyhow::Error> {
             send_db.clone(),
             interval,
             send_task_data_dir,
+            donation_period,
             shutdown_recv,
         )
         .await;
@@ -414,6 +427,7 @@ async fn main() -> Result<(), anyhow::Error> {
             me,
             handler_db.clone(),
             message_handler_data_dir.clone(),
+            donation_period,
         )
     };
 
@@ -421,7 +435,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .branch(Update::filter_message().endpoint(message_handler_fn))
         .branch(
             Update::filter_callback_query()
-                .endpoint(move |bot: Bot, q| callback_handler(recv_db.clone(), bot.clone(), q)),
+                .endpoint(move |bot: Bot, q| callback_handler(recv_db.clone(), bot.clone(), q, donation_period)),
         );
 
     Dispatcher::builder(bot.clone(), handler)

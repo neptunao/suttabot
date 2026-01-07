@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id \"id!: i64\", chat_id as \"chat_id!: i64\", is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count FROM subscription WHERE chat_id = ?",
+  "query": "SELECT id \"id!: i64\", chat_id as \"chat_id!: i64\", is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count, sendout_count FROM subscription WHERE chat_id = ?",
   "describe": {
     "columns": [
       {
@@ -37,6 +37,11 @@
         "name": "donation_reminder_count",
         "ordinal": 6,
         "type_info": "Integer"
+      },
+      {
+        "name": "sendout_count",
+        "ordinal": 7,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -49,8 +54,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "422dffcbded34fb3015f711c234f0c4c3c79d114397a5fb9045fdd17d55ad122"
+  "hash": "f5bbaa97cab08305d11c971a187f6771354aa938a08ec8c0c2e8cb1516752a4b"
 }

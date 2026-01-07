@@ -7,4 +7,5 @@ pub struct SubscriptionDto {
     pub updated_at: i64,
     pub last_donation_reminder: i64,
     pub donation_reminder_count: i64,
+    pub sendout_count: i64,
 }

@@ -23,7 +23,7 @@ impl DbService {
         &self,
         chat_id: i64,
     ) -> Result<Option<SubscriptionDto>, sqlx::Error> {
-        sqlx::query_as!(SubscriptionDto, r#"SELECT id "id!: i64", chat_id as "chat_id!: i64", is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count FROM subscription WHERE chat_id = ?"#, chat_id)
+        sqlx::query_as!(SubscriptionDto, r#"SELECT id "id!: i64", chat_id as "chat_id!: i64", is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count, sendout_count FROM subscription WHERE chat_id = ?"#, chat_id)
             .fetch_optional(&self.pool)
             .await
     }
@@ -33,12 +33,14 @@ impl DbService {
         chat_id: i64,
         is_enabled: i32,
         timestamp: i64,
+        initial_sendout: i64,
     ) -> Result<(), sqlx::Error> {
-        // Set last_donation_reminder to 14 days ago (UTC) so user gets reminder with first daily message
+        // Set last_donation_reminder to 14 days ago (UTC) for tracking
         let last_donation_reminder = timestamp - 1_209_600; // 14 days in seconds
 
+        // initial_sendout passed by caller (donation_period - 1)
         sqlx::query(
-            "INSERT INTO subscription (chat_id, is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count) VALUES (?, ?, ?, ?, ?, ?)"
+            "INSERT INTO subscription (chat_id, is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count, sendout_count) VALUES (?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(chat_id.to_string())
         .bind(is_enabled)
@@ -46,6 +48,7 @@ impl DbService {
         .bind(timestamp)
         .bind(last_donation_reminder)
         .bind(0)
+        .bind(initial_sendout)
         .execute(&self.pool)
         .await?;
 
@@ -129,9 +132,37 @@ impl DbService {
     ) -> Result<Vec<SubscriptionDto>, sqlx::Error> {
         sqlx::query_as!(
             SubscriptionDto,
-            r#"SELECT id as "id!: i64", chat_id as "chat_id!: i64", is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count
+            r#"SELECT id as "id!: i64", chat_id as "chat_id!: i64", is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count, sendout_count
             FROM subscription
             WHERE is_enabled = 1 AND (strftime('%s', 'now') - last_donation_reminder) >= 1296000"#
+        )
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    pub async fn increment_sendout_count(
+        &self,
+        chat_id: i64,
+    ) -> Result<i64, sqlx::Error> {
+        // Increment and return the new value
+        sqlx::query_scalar::<_, i64>(
+            "UPDATE subscription SET sendout_count = sendout_count + 1 WHERE chat_id = ? RETURNING sendout_count"
+        )
+        .bind(chat_id.to_string())
+        .fetch_one(&self.pool)
+        .await
+    }
+
+    pub async fn get_subscriptions_for_donation_by_count(
+        &self,
+        period: i64,
+    ) -> Result<Vec<SubscriptionDto>, sqlx::Error> {
+        sqlx::query_as!(
+            SubscriptionDto,
+            r#"SELECT id as "id!: i64", chat_id as "chat_id!: i64", is_enabled, created_at, updated_at, last_donation_reminder, donation_reminder_count, sendout_count
+            FROM subscription
+            WHERE is_enabled = 1 AND sendout_count % ? = 0"#,
+            period
         )
         .fetch_all(&self.pool)
         .await

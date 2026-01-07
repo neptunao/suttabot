@@ -146,6 +146,7 @@ async fn handle_subscribe_command(
     bot: Bot,
     msg: Message,
     db: Arc<DbService>,
+    donation_period: i64,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     let chat_id = msg.chat.id.0;
     let existing_subscription = db.get_subscription_by_chat_id(chat_id).await?;
@@ -176,7 +177,10 @@ async fn handle_subscribe_command(
             }
         }
         None => {
-            db.create_subscription(chat_id, 1, Utc::now().timestamp())
+            // Initialize sendout_count to DONATION_MESSAGE_PERIOD - 1 so first donation occurs after first sent sutta
+            let initial_sendout = if donation_period > 0 { donation_period - 1 } else { 0 };
+
+            db.create_subscription(chat_id, 1, Utc::now().timestamp(), initial_sendout)
                 .await?;
             info!(
                 "Chat id={} title='{}' subscribed",
@@ -551,6 +555,7 @@ pub async fn message_handler(
     me: Me,
     db: Arc<DbService>,
     data_dir: PathBuf,
+    donation_period: i64,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(text) = msg.text() {
         match BotCommands::parse(text, me.username()) {
@@ -560,7 +565,7 @@ pub async fn message_handler(
                 handle_unsubscribe_command(bot.clone(), msg.clone(), db.clone()).await?
             }
             Ok(Command::Subscribe) => {
-                handle_subscribe_command(bot.clone(), msg.clone(), db.clone()).await?
+                handle_subscribe_command(bot.clone(), msg.clone(), db.clone(), donation_period).await?
             }
             Ok(Command::Random) => {
                 handle_random_command(bot.clone(), msg.clone(), data_dir.clone()).await?
