@@ -1,17 +1,80 @@
 import os
 import re
 import json
-from pathlib import Path
+
+
+QUOTE_LEVELS = (("„", "“"), ("«", "»"))
+
+
+def _is_opening_quote(previous_non_space_char):
+    if previous_non_space_char is None:
+        return True
+
+    return previous_non_space_char in "([{-—–/:;«„"
+
+
+def replace_escaped_quotes(text):
+    result = []
+    in_string = False
+    quote_stack = []
+    previous_non_space_char = None
+    index = 0
+
+    while index < len(text):
+        char = text[index]
+
+        if not in_string:
+            result.append(char)
+            if char == '"':
+                in_string = True
+                quote_stack = []
+                previous_non_space_char = None
+            index += 1
+            continue
+
+        if char == '\\' and index + 1 < len(text):
+            next_char = text[index + 1]
+
+            if next_char == '"':
+                if _is_opening_quote(previous_non_space_char):
+                    level = len(quote_stack) % len(QUOTE_LEVELS)
+                    quote_stack.append(level)
+                    replacement = QUOTE_LEVELS[level][0]
+                else:
+                    level = quote_stack.pop() if quote_stack else 0
+                    replacement = QUOTE_LEVELS[level][1]
+
+                result.append(replacement)
+                previous_non_space_char = replacement
+                index += 2
+                continue
+
+            result.append(char)
+            result.append(next_char)
+            if not next_char.isspace():
+                previous_non_space_char = next_char
+            index += 2
+            continue
+
+        result.append(char)
+        if char == '"':
+            in_string = False
+            quote_stack = []
+            previous_non_space_char = None
+        elif not char.isspace():
+            previous_non_space_char = char
+        index += 1
+
+    return "".join(result)
 
 def process_text(text):
     # Remove square brackets
     text = re.sub(r'\[(.*?)\]', r'\1', text)
+    #replace ... with unicode ellipsis character
+    text = text.replace('...', '…')
 
-    # Replace quotation marks
-    # First replace inner quotes (second level)
-    text = re.sub(r'\\"([^"]*?)\\"', r'„\1  ', text)
-    # Then replace outer quotes (first level)
-    text = re.sub(r'\\"([^"]*?)\\"', r'«\1»', text)
+    # Replace escaped quotation marks inside JSON strings.
+    text = replace_escaped_quotes(text)
 
     return text
 
