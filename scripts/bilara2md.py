@@ -242,18 +242,22 @@ def transform_sutta(source_path: str, format_path: str) -> str:
 
 
 def transform_all_in_folder(source_folder: str, format_folder: str, target_folder: str):
-    sutta_name_regex = re.compile(r"([a-z]+[0-9]+(\.[0-9]+)?)")
+    # Match single or ranged sutta names, e.g. an5.294 or an5.294-302
+    sutta_name_regex = re.compile(r"([a-z]+[0-9]+(?:\.[0-9]+)?(?:-[0-9]+)?)")
 
     # read file by-file in source_folder and format_folder
     os.makedirs(target_folder, exist_ok=True)
 
     for source_file in os.listdir(source_folder):
-        sutta_name = sutta_name_regex.match(source_file).group(0)
+        match = sutta_name_regex.match(source_file)
+        if not match:
+            continue  # skip files that don't match the pattern
+        sutta_name = match.group(1)
         format_file_name = f"{sutta_name}_html.json"
         source_path = os.path.join(source_folder, source_file)
         format_path = os.path.join(format_folder, format_file_name)
         target_path = os.path.join(
-            target_folder, os.path.splitext(source_file)[0] + ".md"
+            target_folder, sutta_name + ".md"
         )
 
         markdown = transform_sutta(source_path, format_path)
