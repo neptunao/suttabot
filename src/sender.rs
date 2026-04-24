@@ -1,11 +1,12 @@
 use anyhow::anyhow;
 use anyhow::Result;
-use log::{debug, error, info};
+use log::{debug, info};
 use rand::seq::IteratorRandom;
 use std::fs;
 use std::fs::DirEntry;
 use std::path::PathBuf;
 use teloxide::payloads::SendMessageSetters;
+use telegram_escape::tg_escape;
 use teloxide::requests::Requester;
 use teloxide::types::ChatId;
 use teloxide::types::ParseMode;
@@ -61,7 +62,7 @@ pub async fn send_daily_message(
 ) -> Result<(), TgMessageSendError> {
     let file = files
         .iter()
-        .choose(&mut rand::thread_rng())
+        .choose(&mut rand::rng())
         .ok_or(anyhow!("No files in data dir"))
         .map_err(TgMessageSendError::UnknownError)?;
 
@@ -86,8 +87,9 @@ pub async fn send_file_text_to_chat(
     );
 
     for text in texts.iter() {
+        let escaped = tg_escape(text);
         let send_msg = bot
-            .send_message(ChatId(chat_id), text)
+            .send_message(ChatId(chat_id), escaped)
             .parse_mode(ParseMode::MarkdownV2);
 
         //TODO remove previous message if second failed to send

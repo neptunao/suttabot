@@ -1870,6 +1870,7 @@ dependencies = [
  "rand 0.9.4",
  "regex",
  "sqlx",
+ "telegram-escape",
  "teloxide",
  "thiserror 2.0.18",
  "tokio",
@@ -1935,6 +1936,12 @@ name = "takecell"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "20f34339676cdcab560c9a82300c4c2581f68b9369aedf0fae86f2ff9565ff3e"
+
+[[package]]
+name = "telegram-escape"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77df9026fed391d0e264c90250df16d02939dcdcdef855ea97e999f13306eb81"
 
 [[package]]
 name = "teloxide"

@@ -36,7 +36,7 @@ enum Command {
 }
 
 async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
-    bot.send_message(msg.chat.id, Command::descriptions().to_string())
+    bot.send_message(msg.chat.id, telegram_escape::tg_escape(&Command::descriptions().to_string()))
         .await?;
 
     info!(
@@ -81,12 +81,12 @@ async fn handle_dana_command(
 async fn handle_start_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
     bot.send_message(
         msg.chat.id,
-        "Нажмите подписаться чтобы получать каждый день сутту из сайта theravada.ru",
+        telegram_escape::tg_escape("Нажмите подписаться чтобы получать каждый день сутту из сайта theravada.ru"),
     )
     .await?;
 
     let keyboard = make_keyboard();
-    bot.send_message(msg.chat.id, "Выберите действие:")
+    bot.send_message(msg.chat.id, telegram_escape::tg_escape("Выберите действие:"))
         .reply_markup(keyboard)
         .await?;
 
@@ -115,7 +115,7 @@ async fn handle_unsubscribe_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, "Вы уже отписаны от рассылки")
+                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Вы уже отписаны от рассылки"))
                     .await?;
             } else {
                 db.set_subscription_enabled(chat_id, 0, Utc::now().timestamp())
@@ -125,7 +125,7 @@ async fn handle_unsubscribe_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, "Вы отписались от рассылки")
+                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Вы отписались от рассылки"))
                     .await?;
             }
         }
@@ -135,7 +135,7 @@ async fn handle_unsubscribe_command(
                 chat_id,
                 msg.chat.title().unwrap_or("")
             );
-            bot.send_message(msg.chat.id, "Вы не подписаны на рассылку")
+            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Вы не подписаны на рассылку"))
                 .await?;
         }
     }
@@ -159,7 +159,7 @@ async fn handle_subscribe_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, "Вы уже подписаны на рассылку")
+                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Вы уже подписаны на рассылку"))
                     .await?;
             } else {
                 db.set_subscription_enabled(chat_id, 1, Utc::now().timestamp())
@@ -171,7 +171,7 @@ async fn handle_subscribe_command(
                 );
                 bot.send_message(
                     msg.chat.id,
-                    "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве",
+                    telegram_escape::tg_escape("Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве"),
                 )
                 .await?;
             }
@@ -189,7 +189,7 @@ async fn handle_subscribe_command(
             );
             bot.send_message(
                 msg.chat.id,
-                "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве",
+                telegram_escape::tg_escape("Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве"),
             )
             .await?;
         }
@@ -206,7 +206,7 @@ async fn handle_random_command(
     // TODO refactor duplication here
     let mut random_file = files
         .iter()
-        .choose(&mut rand::thread_rng())
+        .choose(&mut rand::rng())
         .ok_or(anyhow!("No files in data dir"))?;
     let mut retry_count = 0;
 
@@ -216,7 +216,7 @@ async fn handle_random_command(
         // TODO refactor duplication here
         random_file = files
             .iter()
-            .choose(&mut rand::thread_rng())
+            .choose(&mut rand::rng())
             .ok_or(anyhow!("No files in data dir"))?;
 
         if retry_count >= MAX_RETRY_COUNT {
@@ -266,7 +266,7 @@ async fn handle_set_time_command(
     if times.is_empty() {
         bot.send_message(
             msg.chat.id,
-            "Укажите время рассылки в формате 6:00 8:18 19:31",
+            telegram_escape::tg_escape("Укажите время рассылки в формате 6:00 8:18 19:31"),
         )
         .await?;
 
@@ -276,10 +276,10 @@ async fn handle_set_time_command(
     if times.len() > MAX_SENDOUT_TIMES {
         bot.send_message(
             msg.chat.id,
-            format!(
+            telegram_escape::tg_escape(&format!(
                 "Максимальное количество времени рассылки - {} раз в сутки.",
                 MAX_SENDOUT_TIMES
-            ),
+            )),
         )
         .await?;
 
@@ -295,7 +295,7 @@ async fn handle_set_time_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, "Вы не подписаны на рассылку")
+                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Вы не подписаны на рассылку"))
                     .await?;
             } else {
                 db.set_sendout_times(subscription.id, &times).await?;
@@ -307,7 +307,7 @@ async fn handle_set_time_command(
                 );
                 bot.send_message(
                     msg.chat.id,
-                    "Время рассылки изменено. Вы будете получать новую сутту каждый день в указанное время",
+                    telegram_escape::tg_escape("Время рассылки изменено. Вы будете получать новую сутту каждый день в указанное время"),
                 )
                 .await?;
             }
@@ -318,7 +318,7 @@ async fn handle_set_time_command(
                 chat_id,
                 msg.chat.title().unwrap_or("")
             );
-            bot.send_message(msg.chat.id, "Вы не подписаны на рассылку")
+            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Вы не подписаны на рассылку"))
                 .await?;
         }
     }
