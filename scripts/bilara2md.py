@@ -5,6 +5,14 @@ import re
 import sys
 
 
+def parse_numeric_parts(part):
+    """
+    Convert an id fragment such as "33-35" into a tuple of integers that sorts
+    numerically instead of lexicographically.
+    """
+    return tuple(int(piece) for piece in re.findall(r"\d+", part))
+
+
 def split_on_j(text):
     """
     If the text contains the marker <j> (indicating a forced line break),
@@ -164,10 +172,9 @@ def convert_json_to_markdown(json_source_str, json_format_str):
 
     # Sort keys in natural order (we assume keys have the form "something:group.seq")
     def sort_key(key):
-        src, sub = key.split(":")
-        splits = sub.split(".")
-        group, seq = splits[0], splits[1]
-        return (src, group, int(seq))
+        src, sub = key.split(":", 1)
+        group, seq = sub.split(".", 1)
+        return (src, parse_numeric_parts(group), parse_numeric_parts(seq))
 
     keys = sorted(source.keys(), key=sort_key)
 
