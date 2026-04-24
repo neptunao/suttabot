@@ -2,7 +2,7 @@
 name = "suttabot"
 version = "0.1.1"
 edition = "2021"
-rust-version = "1.94"
+rust-version = "1.95"
 
 [dependencies]
 teloxide = { version = "0.12.2", features = ["macros", "auto-send"] }
