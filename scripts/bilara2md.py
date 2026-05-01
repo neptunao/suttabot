@@ -248,7 +248,27 @@ def transform_sutta(source_path: str, format_path: str) -> str:
         raise
 
 
-def transform_all_in_folder(source_folder: str, format_folder: str, target_folder: str):
+def output_filename(source_file: str, sutta_name: str, filename_format: str) -> str:
+    if filename_format == "numerical":
+        return sutta_name + ".md"
+    # "full": preserve source stem, e.g. mn98_translation-ru-sv.json -> mn98_translation-ru-sv.md
+    return os.path.splitext(source_file)[0] + ".md"
+
+
+def delete_alternative(target_dir: str, source_file: str, sutta_name: str, filename_format: str):
+    alt_format = "numerical" if filename_format == "full" else "full"
+    alt_path = os.path.join(target_dir, output_filename(source_file, sutta_name, alt_format))
+    if os.path.exists(alt_path):
+        os.remove(alt_path)
+
+
+def transform_all_in_folder(
+    source_folder: str,
+    format_folder: str,
+    target_folder: str,
+    filename_format: str = "full",
+    overwrite: bool = False,
+):
     # Match single or ranged sutta names, e.g. an5.294 or an5.294-302
     sutta_name_regex = re.compile(r"([a-z]+[0-9]+(?:\.[0-9]+)?(?:-[0-9]+)?)")
 
@@ -264,8 +284,14 @@ def transform_all_in_folder(source_folder: str, format_folder: str, target_folde
         source_path = os.path.join(source_folder, source_file)
         format_path = os.path.join(format_folder, format_file_name)
         target_path = os.path.join(
-            target_folder, sutta_name + ".md"
+            target_folder, output_filename(source_file, sutta_name, filename_format)
         )
+
+        if not overwrite and os.path.exists(target_path):
+            continue
+
+        if overwrite:
+            delete_alternative(target_folder, source_file, sutta_name, filename_format)
 
         markdown = transform_sutta(source_path, format_path)
 
@@ -273,8 +299,88 @@ def transform_all_in_folder(source_folder: str, format_folder: str, target_folde
             f.write(markdown)
 
 
+def transform_all_recursive(
+    source_folder: str,
+    format_folder: str,
+    target_folder: str,
+    filename_format: str = "full",
+    overwrite: bool = False,
+):
+    sutta_name_regex = re.compile(r"([a-z]+[0-9]+(?:\.[0-9]+)?(?:-[0-9]+)?)")
+
+    os.makedirs(target_folder, exist_ok=True)
+
+    for dirpath, _, files in os.walk(source_folder):
+        rel_dir = os.path.relpath(dirpath, source_folder)
+        current_format_dir = os.path.join(format_folder, rel_dir)
+
+        matching = [f for f in files if sutta_name_regex.match(f)]
+        if not matching:
+            continue
+
+        for source_file in matching:
+            match = sutta_name_regex.match(source_file)
+            sutta_name = match.group(1)
+            format_file_name = f"{sutta_name}_html.json"
+            source_path = os.path.join(dirpath, source_file)
+            format_path = os.path.join(current_format_dir, format_file_name)
+            target_path = os.path.join(
+                target_folder, output_filename(source_file, sutta_name, filename_format)
+            )
+
+            if not overwrite and os.path.exists(target_path):
+                continue
+
+            if overwrite:
+                delete_alternative(target_folder, source_file, sutta_name, filename_format)
+
+            markdown = transform_sutta(source_path, format_path)
+
+            with open(target_path, "w") as f:
+                f.write(markdown)
+
+
 def main():
-    transform_all_in_folder(sys.argv[1], sys.argv[2], sys.argv[3])
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Convert Bilara JSON suttas to Markdown"
+    )
+    parser.add_argument("source_folder")
+    parser.add_argument("format_folder")
+    parser.add_argument("target_folder")
+    parser.add_argument(
+        "-r",
+        "--recursive",
+        action="store_true",
+        default=True,
+        help="Traverse source and format folders recursively, writing all output flat into target_folder (default: true)",
+    )
+    parser.add_argument(
+        "--filename-format",
+        choices=["numerical", "full"],
+        default="full",
+        help="Output filename format: 'numerical' (e.g. sn1.22.md) or 'full' preserving the source stem (e.g. mn98_translation-ru-sv.md) (default: full)",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        default=False,
+        help="Delete the alternative-format file for the same sutta in the target folder before writing (default: false)",
+    )
+
+    args = parser.parse_args()
+
+    if args.recursive:
+        transform_all_recursive(
+            args.source_folder, args.format_folder, args.target_folder,
+            args.filename_format, args.overwrite,
+        )
+    else:
+        transform_all_in_folder(
+            args.source_folder, args.format_folder, args.target_folder,
+            args.filename_format, args.overwrite,
+        )
 
 
 if __name__ == "__main__":
