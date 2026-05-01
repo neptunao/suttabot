@@ -66,7 +66,7 @@ SQLite via sqlx with migrations in `db/migrations/`. The single table `subscript
 
 ### Data / scripts
 
-Sutta `.md` files are **not stored in the repo**. The `scripts/` directory has Python utilities to convert source data into the expected format:
+Sutta `.md` files are stored in `data/ru/` and included in the repo. The `scripts/` directory has Python utilities to convert source data into the expected format:
 - `bilara2md.py` — converts SuttaCentral Bilara JSON exports to Markdown
 - `suttacentral2md.py` / `bilarify.py` — additional conversion helpers
 
