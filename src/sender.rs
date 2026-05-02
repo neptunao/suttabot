@@ -14,6 +14,8 @@ use teloxide::RequestError;
 use thiserror::Error;
 
 use teloxide::Bot;
+use teloxide::types::InlineKeyboardButton;
+use teloxide::types::InlineKeyboardMarkup;
 
 use crate::helpers::TELEGRAM_TEXT_MAX_LENGTH;
 
@@ -99,7 +101,55 @@ pub async fn send_file_text_to_chat(
     Ok(())
 }
 
-fn chunk_text(content: String) -> Vec<String> {
+pub async fn send_announcement(
+    bot: &Bot,
+    chat_id: i64,
+    body: &str,
+    version: &str,
+    with_optout_button: bool,
+) -> Result<(), TgMessageSendError> {
+    let escaped_version = tg_escape(version);
+    let header = format!("📜 *Что нового* — v{}\n\n", escaped_version);
+    let escaped_body = tg_escape(body);
+    let full_text = format!("{}{}", header, escaped_body);
+
+    let chunks = chunk_text(full_text);
+    if chunks.is_empty() {
+        return Ok(());
+    }
+
+    let last_idx = chunks.len() - 1;
+    let keyboard = if with_optout_button {
+        Some(InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback(
+                "🔕 Не показывать обновления".to_owned(),
+                "news_optout".to_owned(),
+            ),
+        ]]))
+    } else {
+        None
+    };
+
+    for (i, chunk) in chunks.iter().enumerate() {
+        let send_msg = bot
+            .send_message(ChatId(chat_id), chunk.clone())
+            .parse_mode(ParseMode::MarkdownV2);
+
+        if i == last_idx {
+            if let Some(ref kb) = keyboard {
+                map_send_error(send_msg.reply_markup(kb.clone()).await)?;
+            } else {
+                map_send_error(send_msg.await)?;
+            }
+        } else {
+            map_send_error(send_msg.await)?;
+        }
+    }
+
+    Ok(())
+}
+
+pub(crate) fn chunk_text(content: String) -> Vec<String> {
     // Create chunks that don't break escape sequences
     let mut texts = Vec::new();
     let mut current_chunk = String::new();

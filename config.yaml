@@ -1,0 +1,4 @@
+admins:
+  # Prefer user_id (immutable). username is also accepted but Telegram allows renaming.
+  # - user_id: 123456789
+  - username: neptunao
