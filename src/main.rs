@@ -15,13 +15,16 @@ use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
 use tokio::time::{interval_at, Instant};
 
+use crate::config::Config;
 use crate::message_handler::message_handler;
-use crate::sender::{send_daily_message, send_file_text_to_chat, TgMessageSendError};
+use crate::sender::{send_announcement, send_daily_message, send_file_text_to_chat, TgMessageSendError};
 
+mod config;
 mod db;
 mod dto;
 mod helpers;
 mod message_handler;
+mod news;
 mod sender;
 
 const RETRY_LIMIT: u8 = 5;
@@ -70,8 +73,64 @@ async fn callback_handler(
     bot: Bot,
     q: CallbackQuery,
     donation_period: i64,
+    config: Arc<Config>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(chosen_action) = &q.data {
+        // News opt-out
+        if chosen_action == "news_optout" {
+            if let Some(chat_id) = q.chat_id() {
+                db.set_announcements_enabled(chat_id.0, false).await?;
+            }
+            bot.answer_callback_query(q.id)
+                .text("Отключено. /news on — включить обратно.")
+                .await?;
+            return Ok(());
+        }
+
+        // Force re-broadcast
+        if let Some(slug) = chosen_action.strip_prefix("announce_force:") {
+            if !config.is_admin(&q.from) {
+                bot.answer_callback_query(q.id)
+                    .text("Только для администраторов.")
+                    .await?;
+                return Ok(());
+            }
+
+            let admin_chat_id = q.chat_id();
+            bot.answer_callback_query(q.id).text("Рассылаю...").await?;
+
+            match news::by_slug(slug) {
+                Ok(Some(entry)) => {
+                    let version = env!("CARGO_PKG_VERSION");
+                    let recipients = db.get_announcement_recipients().await?;
+                    let mut sent_count = 0i64;
+                    for &chat_id in &recipients {
+                        match send_announcement(&bot, chat_id, &entry.body, version, true).await {
+                            Ok(()) => sent_count += 1,
+                            Err(e) => {
+                                error!("Failed to resend announcement to chat_id={}: {:?}", chat_id, e);
+                            }
+                        }
+                    }
+                    if let Some(chat_id) = admin_chat_id {
+                        db.record_news_broadcast(slug, sent_count, chat_id.0, version).await?;
+                        let text = format!("Готово. Разослано {} из {} получателей.", sent_count, recipients.len());
+                        bot.send_message(chat_id, telegram_escape::tg_escape(&text)).await?;
+                    }
+                    info!("Force-rebroadcast news '{}': {}/{} sent", slug, sent_count, recipients.len());
+                }
+                Ok(None) => {
+                    if let Some(chat_id) = admin_chat_id {
+                        bot.send_message(chat_id, telegram_escape::tg_escape("Запись не найдена.")).await?;
+                    }
+                }
+                Err(e) => {
+                    error!("Error loading news entry '{}': {:?}", slug, e);
+                }
+            }
+            return Ok(());
+        }
+
         if let Some(chat_id) = q.chat_id() {
             let now = Utc::now();
             let timestamp = now.timestamp();
@@ -304,6 +363,26 @@ async fn send_daily_and_maybe_donation(
     files: &Vec<std::fs::DirEntry>,
     donation_period: i64,
 ) -> Result<(), TgMessageSendError> {
+    // Send latest news to new subscribers on their first daily sutta
+    if let Ok(Some((announcements_enabled, news_onboarded))) =
+        db.get_subscription_news_status(chat_id).await
+    {
+        if news_onboarded == 0 {
+            if announcements_enabled == 1 {
+                if let Ok(Some(record)) = db.get_news_broadcast_latest().await {
+                    if let Ok(Some(entry)) = news::by_slug(&record.slug) {
+                        if let Err(e) = send_announcement(bot, chat_id, &entry.body, &record.version, false).await {
+                            warn!("Failed to send onboarding news to chat_id={}: {:?}", chat_id, e);
+                        }
+                    }
+                }
+            }
+            if let Err(e) = db.set_news_onboarded(chat_id).await {
+                warn!("Failed to set news_onboarded for chat_id={}: {:?}", chat_id, e);
+            }
+        }
+    }
+
     // Send the daily sutta
     send_daily_message(bot, chat_id, files.as_slice()).await?;
 
@@ -391,6 +470,14 @@ async fn main() -> Result<(), anyhow::Error> {
     db_service.migrate().await?;
     info!("Database migrated");
 
+    info!("Loading config from {}...", helpers::CONFIG_PATH);
+    let config = Arc::new(Config::load()?);
+    info!("Config loaded ({} admin(s))", config.admins.len());
+
+    info!("Validating news entries...");
+    news::validate_all()?;
+    info!("News entries validated");
+
     info!("Starting bot...");
     let bot = Bot::from_env();
 
@@ -417,7 +504,9 @@ async fn main() -> Result<(), anyhow::Error> {
     });
 
     let recv_db = db_service.clone();
+    let recv_config = config.clone();
     let handler_db = db_service.clone();
+    let handler_config = config.clone();
 
     let message_handler_data_dir = data_dir.clone();
     let message_handler_fn = move |bot: Bot, msg: Message, me: Me| {
@@ -428,6 +517,7 @@ async fn main() -> Result<(), anyhow::Error> {
             handler_db.clone(),
             message_handler_data_dir.clone(),
             donation_period,
+            handler_config.clone(),
         )
     };
 
@@ -435,7 +525,7 @@ async fn main() -> Result<(), anyhow::Error> {
         .branch(Update::filter_message().endpoint(message_handler_fn))
         .branch(
             Update::filter_callback_query()
-                .endpoint(move |bot: Bot, q| callback_handler(recv_db.clone(), bot.clone(), q, donation_period)),
+                .endpoint(move |bot: Bot, q| callback_handler(recv_db.clone(), bot.clone(), q, donation_period, recv_config.clone())),
         );
 
     Dispatcher::builder(bot.clone(), handler)
