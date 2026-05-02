@@ -9,3 +9,12 @@ pub struct SubscriptionDto {
     pub donation_reminder_count: i64,
     pub sendout_count: i64,
 }
+
+#[derive(sqlx::FromRow, Debug, Clone)]
+pub struct NewsBroadcastDto {
+    pub slug: String,
+    pub broadcast_at: String,
+    pub recipient_count: i64,
+    pub triggered_by: i64,
+    pub version: String,
+}

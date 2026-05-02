@@ -1,0 +1,55 @@
+[workspace]
+changelog_update = true
+git_release_enable = true
+
+[changelog]
+header = """# Changelog
+
+All notable technical changes to this project are documented here.
+
+"""
+body = """
+## [{{ version }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group }}
+{% for commit in commits %}- {{ commit.message }}{% if commit.breaking %} **[BREAKING]**{% endif %}
+{% endfor %}
+{% endfor %}
+"""
+trim = true
+
+[[changelog.commit_parsers]]
+message = "^feat"
+group = "Features"
+
+[[changelog.commit_parsers]]
+message = "^fix"
+group = "Bug Fixes"
+
+[[changelog.commit_parsers]]
+message = "^perf"
+group = "Performance"
+
+[[changelog.commit_parsers]]
+message = "^refactor"
+group = "Internal"
+
+[[changelog.commit_parsers]]
+message = "^docs"
+group = "Documentation"
+
+[[changelog.commit_parsers]]
+message = "^chore"
+skip = true
+
+[[changelog.commit_parsers]]
+message = "^ci"
+skip = true
+
+[[changelog.commit_parsers]]
+message = "^build"
+skip = true
+
+[[changelog.commit_parsers]]
+message = "^test"
+skip = true

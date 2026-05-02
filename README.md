@@ -46,7 +46,53 @@ docker run -d --name=suttabot -e RUST_LOG=info -e TELOXIDE_TOKEN="<TELOXIDE_TOKE
 | `/get <id>` | Find and send a sutta by number, e.g. `/get МН 65` or `/get mn65`. Supports Latin and Cyrillic collection codes (MN, SN, AN, DN, and their Russian equivalents). |
 | `/settime <times>` | Set daily delivery times, e.g. `/settime 6:00 8:18 19:31`. Up to 10 times per day. Requires an active subscription. (**not yet implemented** — times are saved but ignored; delivery is fixed at 08:00 Moscow time) |
 | `/dana` | Show donation information for Dhamma centres |
+| `/news` | Show the latest "what's new" announcement |
+| `/news all` | Show the full announcement history |
+| `/news <slug\|date\|version>` | Show a specific announcement by slug, date (`2026-05-02`), filename, or version (`v1.2.0`) |
+| `/news off` / `/news on` | Opt out of or back into announcement broadcasts |
+| `/announce` | **(admin)** Broadcast the latest news entry to all subscribers |
+| `/announce <slug\|date\|filename>` | **(admin)** Broadcast a specific news entry |
 | `/help` | List all available commands |
+
+## Releases
+
+Versioning is automated via [release-plz](https://release-plz.dev/). Commit messages must follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+- `feat: add /random command` → minor version bump
+- `fix: correct chunk boundary` → patch version bump
+- `feat!: ...` or `BREAKING CHANGE:` footer → major bump
+- `chore:`, `ci:`, `build:`, `test:`, `refactor:`, `docs:` → no bump, excluded from user-facing changelog
+
+On every push to `main`, `release-plz` opens or updates a release PR that accumulates commits and bumps `Cargo.toml`. Merging the PR creates a git tag and a GitHub Release with a grouped technical changelog. No manual version editing required.
+
+## Announcements (What's New)
+
+User-facing "what's new" entries are separate from technical releases. Add a file to `news/` when there is something users would care about (new command, new content source, etc.). Technical releases (refactors, CI changes, deps) do not need an entry.
+
+**Naming convention:** `news/<YYYY-MM-DD>-<slug>.md`
+- `<slug>` must be kebab-case (`[a-z0-9]+(-[a-z0-9]+)*`), e.g. `random-command`, `an-collection-added`
+- Slugs must be unique across the `news/` directory
+
+**Workflow:**
+1. Write the entry in `news/` in plain Russian markdown (no header — the bot adds one automatically)
+2. Commit, open PR, merge
+3. Deploy (the Docker build triggers automatically on merge to main)
+4. Run `/announce` from an admin account in Telegram — broadcasts to all opted-in subscribers
+
+**Re-broadcasting:** running `/announce slug` a second time shows a warning with the prior timestamp. An inline "Send again" button allows a deliberate re-broadcast.
+
+## Configuration
+
+Bot configuration lives in `config.yaml` at the working directory. The file is committed to the repo — Telegram user IDs and usernames are not secrets.
+
+```yaml
+admins:
+  # Prefer user_id (immutable). username is also accepted but can change.
+  - user_id: 123456789
+  - username: your_username
+```
+
+Admins can run `/announce`. `user_id` takes priority over `username` in matching; both may be listed for the same person.
 
 ## Data Scripts
 

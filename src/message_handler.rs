@@ -1,7 +1,9 @@
+use crate::config::Config;
 use crate::db::DbService;
 use crate::helpers::{list_files, MAX_RETRY_COUNT, MAX_SENDOUT_TIMES};
 use crate::make_keyboard;
-use crate::sender::send_file_text_to_chat;
+use crate::news::{self, ResolveResult};
+use crate::sender::{self, send_file_text_to_chat};
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use log::{info, warn};
@@ -33,6 +35,10 @@ enum Command {
     Get(String),
     #[command(description = "информация о поддержке Дхамма-центров")]
     Dana,
+    #[command(description = "(админ) разослать новость; /announce <slug|дата|файл> — конкретную")]
+    Announce(String),
+    #[command(description = "что нового в боте; /news all — вся история; /news off/on — отключить/включить")]
+    News(String),
 }
 
 async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -549,6 +555,198 @@ async fn handle_get_command(
     Ok(())
 }
 
+async fn handle_announce_command(
+    bot: Bot,
+    msg: Message,
+    db: Arc<DbService>,
+    config: Arc<Config>,
+    arg: String,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let from = match msg.from() {
+        Some(user) => user,
+        None => {
+            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Команда доступна только в личном чате.")).await?;
+            return Ok(());
+        }
+    };
+
+    if !config.is_admin(from) {
+        bot.send_message(msg.chat.id, telegram_escape::tg_escape("Команда доступна только администраторам.")).await?;
+        info!("Rejected /announce from non-admin chat_id={}", msg.chat.id.0);
+        return Ok(());
+    }
+
+    let entry = match news::resolve(&arg)? {
+        ResolveResult::Empty => match news::latest()? {
+            Some(e) => e,
+            None => {
+                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Нет новостных записей в директории news/.")).await?;
+                return Ok(());
+            }
+        },
+        ResolveResult::Single(e) => e,
+        ResolveResult::MultipleByDate(entries) => {
+            let list = entries.iter().map(|e| format!("{}-{}", e.date, e.slug)).collect::<Vec<_>>().join("\n");
+            bot.send_message(
+                msg.chat.id,
+                telegram_escape::tg_escape(&format!("Несколько записей за эту дату, уточните:\n{}", list)),
+            ).await?;
+            return Ok(());
+        }
+        ResolveResult::NotFound => {
+            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Запись не найдена.")).await?;
+            return Ok(());
+        }
+    };
+
+    // Check for existing broadcast — show warning with "send anyway" button
+    if let Some(record) = db.get_news_broadcast(&entry.slug).await? {
+        use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
+        let keyboard = InlineKeyboardMarkup::new(vec![vec![
+            InlineKeyboardButton::callback(
+                "Отправить ещё раз".to_owned(),
+                format!("announce_force:{}", entry.slug),
+            ),
+        ]]);
+        let text = format!(
+            "Запись '{}' уже была разослана {} ({} получателей). Разослать снова?",
+            entry.slug, record.broadcast_at, record.recipient_count
+        );
+        bot.send_message(msg.chat.id, telegram_escape::tg_escape(&text))
+            .reply_markup(keyboard)
+            .await?;
+        return Ok(());
+    }
+
+    let version = env!("CARGO_PKG_VERSION");
+    let recipients = db.get_announcement_recipients().await?;
+    let mut sent_count = 0i64;
+
+    for &chat_id in &recipients {
+        match sender::send_announcement(&bot, chat_id, &entry.body, version, true).await {
+            Ok(()) => sent_count += 1,
+            Err(e) => {
+                log::error!("Failed to send announcement to chat_id={}: {:?}", chat_id, e);
+            }
+        }
+    }
+
+    db.record_news_broadcast(&entry.slug, sent_count, msg.chat.id.0, version).await?;
+
+    let text = format!("Готово. Разослано {} из {} получателей.", sent_count, recipients.len());
+    bot.send_message(msg.chat.id, telegram_escape::tg_escape(&text)).await?;
+
+    info!("Admin chat_id={} broadcast news '{}' to {}/{} recipients", msg.chat.id.0, entry.slug, sent_count, recipients.len());
+    Ok(())
+}
+
+async fn handle_news_command(
+    bot: Bot,
+    msg: Message,
+    db: Arc<DbService>,
+    arg: String,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    let chat_id = msg.chat.id.0;
+
+    // Reserved words handled first
+    match arg.trim() {
+        "off" => {
+            db.set_announcements_enabled(chat_id, false).await?;
+            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Уведомления об обновлениях отключены. /news on — снова включить.")).await?;
+            return Ok(());
+        }
+        "on" => {
+            db.set_announcements_enabled(chat_id, true).await?;
+            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Уведомления об обновлениях включены.")).await?;
+            return Ok(());
+        }
+        "all" => {
+            let broadcasts = db.get_news_broadcasts_all().await?;
+            if broadcasts.is_empty() {
+                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Новостей пока нет.")).await?;
+                return Ok(());
+            }
+            for record in &broadcasts {
+                if let Ok(Some(entry)) = news::by_slug(&record.slug) {
+                    if let Err(e) = sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false).await {
+                        log::warn!("Failed to send /news all entry '{}' to chat_id={}: {:?}", record.slug, chat_id, e);
+                    }
+                }
+            }
+            return Ok(());
+        }
+        _ => {}
+    }
+
+    // Semver lookup: v1.4.0 or 1.4.0
+    let semver_re = Regex::new(r"^v?\d+\.\d+\.\d+$").unwrap();
+    if semver_re.is_match(arg.trim()) {
+        let broadcasts = db.get_news_broadcasts_by_version(arg.trim()).await?;
+        if broadcasts.is_empty() {
+            bot.send_message(msg.chat.id, telegram_escape::tg_escape(&format!("Новостей для версии {} не найдено.", arg.trim()))).await?;
+            return Ok(());
+        }
+        for record in &broadcasts {
+            if let Ok(Some(entry)) = news::by_slug(&record.slug) {
+                if let Err(e) = sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false).await {
+                    log::warn!("Failed to send /news version entry to chat_id={}: {:?}", chat_id, e);
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    // Filesystem resolve (empty / slug / date / full filename)
+    match news::resolve(arg.trim())? {
+        ResolveResult::Empty => {
+            match db.get_news_broadcast_latest().await? {
+                Some(record) => {
+                    match news::by_slug(&record.slug)? {
+                        Some(entry) => {
+                            sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false).await?;
+                        }
+                        None => {
+                            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Новостей пока нет.")).await?;
+                        }
+                    }
+                }
+                None => {
+                    bot.send_message(msg.chat.id, telegram_escape::tg_escape("Новостей пока нет.")).await?;
+                }
+            }
+        }
+        ResolveResult::Single(entry) => {
+            match db.get_news_broadcast(&entry.slug).await? {
+                Some(record) => {
+                    sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false).await?;
+                }
+                None => {
+                    bot.send_message(msg.chat.id, telegram_escape::tg_escape("Эта запись ещё не была разослана.")).await?;
+                }
+            }
+        }
+        ResolveResult::MultipleByDate(entries) => {
+            let mut found = false;
+            for entry in &entries {
+                if let Ok(Some(record)) = db.get_news_broadcast(&entry.slug).await {
+                    found = true;
+                    if let Err(e) = sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false).await {
+                        log::warn!("Failed to send /news date entry to chat_id={}: {:?}", chat_id, e);
+                    }
+                }
+            }
+            if !found {
+                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Записи за эту дату ещё не были разосланы.")).await?;
+            }
+        }
+        ResolveResult::NotFound => {
+            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Не найдено.")).await?;
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn message_handler(
     bot: Bot,
     msg: Message,
@@ -556,6 +754,7 @@ pub async fn message_handler(
     db: Arc<DbService>,
     data_dir: PathBuf,
     donation_period: i64,
+    config: Arc<Config>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     if let Some(text) = msg.text() {
         match BotCommands::parse(text, me.username()) {
@@ -578,6 +777,12 @@ pub async fn message_handler(
             }
             Ok(Command::Dana) => {
                 handle_dana_command(bot.clone(), msg.clone(), db.clone()).await?
+            }
+            Ok(Command::Announce(arg)) => {
+                handle_announce_command(bot.clone(), msg.clone(), db.clone(), config.clone(), arg).await?
+            }
+            Ok(Command::News(arg)) => {
+                handle_news_command(bot.clone(), msg.clone(), db.clone(), arg).await?
             }
             Err(_) => {
                 if text.starts_with('/') {
