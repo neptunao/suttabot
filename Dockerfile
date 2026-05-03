@@ -27,6 +27,7 @@ ENV DATABASE_URL=sqlite://db/suttabot.db
 ENV DATA_DIR=/data/ru
 
 COPY ./data /data
+COPY config.yaml /
 COPY --from=builder /usr/src/app/target/release/suttabot /
 
 CMD ["./suttabot"]
