@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::Me;
-use teloxide::utils::command::BotCommands;
+use teloxide::utils::{command::BotCommands, markdown::escape};
 
 #[derive(BotCommands)]
 #[command(rename_rule = "lowercase")]
@@ -44,7 +44,7 @@ enum Command {
 }
 
 async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
-    bot.send_message(msg.chat.id, telegram_escape::tg_escape(&Command::descriptions().to_string()))
+    bot.send_message(msg.chat.id, escape(&Command::descriptions().to_string()))
         .await?;
 
     info!(
@@ -89,12 +89,12 @@ async fn handle_dana_command(
 async fn handle_start_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
     bot.send_message(
         msg.chat.id,
-        telegram_escape::tg_escape("Нажмите подписаться чтобы получать каждый день сутту из сайта theravada.ru"),
+        escape("Нажмите подписаться чтобы получать каждый день сутту из сайта theravada.ru"),
     )
     .await?;
 
     let keyboard = make_keyboard();
-    bot.send_message(msg.chat.id, telegram_escape::tg_escape("Выберите действие:"))
+    bot.send_message(msg.chat.id, escape("Выберите действие:"))
         .reply_markup(keyboard)
         .await?;
 
@@ -123,7 +123,7 @@ async fn handle_unsubscribe_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Вы уже отписаны от рассылки"))
+                bot.send_message(msg.chat.id, escape("Вы уже отписаны от рассылки"))
                     .await?;
             } else {
                 db.set_subscription_enabled(chat_id, 0, Utc::now().timestamp())
@@ -133,7 +133,7 @@ async fn handle_unsubscribe_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Вы отписались от рассылки"))
+                bot.send_message(msg.chat.id, escape("Вы отписались от рассылки"))
                     .await?;
             }
         }
@@ -143,7 +143,7 @@ async fn handle_unsubscribe_command(
                 chat_id,
                 msg.chat.title().unwrap_or("")
             );
-            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Вы не подписаны на рассылку"))
+            bot.send_message(msg.chat.id, escape("Вы не подписаны на рассылку"))
                 .await?;
         }
     }
@@ -167,7 +167,7 @@ async fn handle_subscribe_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Вы уже подписаны на рассылку"))
+                bot.send_message(msg.chat.id, escape("Вы уже подписаны на рассылку"))
                     .await?;
             } else {
                 db.set_subscription_enabled(chat_id, 1, Utc::now().timestamp())
@@ -179,7 +179,7 @@ async fn handle_subscribe_command(
                 );
                 bot.send_message(
                     msg.chat.id,
-                    telegram_escape::tg_escape("Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве"),
+                    escape("Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве"),
                 )
                 .await?;
             }
@@ -197,7 +197,7 @@ async fn handle_subscribe_command(
             );
             bot.send_message(
                 msg.chat.id,
-                telegram_escape::tg_escape("Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве"),
+                escape("Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве"),
             )
             .await?;
         }
@@ -274,7 +274,7 @@ async fn handle_set_time_command(
     if times.is_empty() {
         bot.send_message(
             msg.chat.id,
-            telegram_escape::tg_escape("Укажите время рассылки в формате 6:00 8:18 19:31"),
+            escape("Укажите время рассылки в формате 6:00 8:18 19:31"),
         )
         .await?;
 
@@ -284,7 +284,7 @@ async fn handle_set_time_command(
     if times.len() > MAX_SENDOUT_TIMES {
         bot.send_message(
             msg.chat.id,
-            telegram_escape::tg_escape(&format!(
+            escape(&format!(
                 "Максимальное количество времени рассылки - {} раз в сутки.",
                 MAX_SENDOUT_TIMES
             )),
@@ -303,7 +303,7 @@ async fn handle_set_time_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Вы не подписаны на рассылку"))
+                bot.send_message(msg.chat.id, escape("Вы не подписаны на рассылку"))
                     .await?;
             } else {
                 db.set_sendout_times(subscription.id, &times).await?;
@@ -315,7 +315,7 @@ async fn handle_set_time_command(
                 );
                 bot.send_message(
                     msg.chat.id,
-                    telegram_escape::tg_escape("Время рассылки изменено. Вы будете получать новую сутту каждый день в указанное время"),
+                    escape("Время рассылки изменено. Вы будете получать новую сутту каждый день в указанное время"),
                 )
                 .await?;
             }
@@ -326,7 +326,7 @@ async fn handle_set_time_command(
                 chat_id,
                 msg.chat.title().unwrap_or("")
             );
-            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Вы не подписаны на рассылку"))
+            bot.send_message(msg.chat.id, escape("Вы не подписаны на рассылку"))
                 .await?;
         }
     }
@@ -567,13 +567,13 @@ async fn handle_announce_command(
     let from = match msg.from() {
         Some(user) => user,
         None => {
-            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Команда доступна только в личном чате.")).await?;
+            bot.send_message(msg.chat.id, escape("Команда доступна только в личном чате.")).await?;
             return Ok(());
         }
     };
 
     if !config.is_admin(from) {
-        bot.send_message(msg.chat.id, telegram_escape::tg_escape("Команда доступна только администраторам.")).await?;
+        bot.send_message(msg.chat.id, escape("Команда доступна только администраторам.")).await?;
         info!("Rejected /announce from non-admin chat_id={}", msg.chat.id.0);
         return Ok(());
     }
@@ -582,7 +582,7 @@ async fn handle_announce_command(
         ResolveResult::Empty => match news::latest()? {
             Some(e) => e,
             None => {
-                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Нет новостных записей в директории news/.")).await?;
+                bot.send_message(msg.chat.id, escape("Нет новостных записей в директории news/.")).await?;
                 return Ok(());
             }
         },
@@ -591,12 +591,12 @@ async fn handle_announce_command(
             let list = entries.iter().map(|e| format!("{}-{}", e.date, e.slug)).collect::<Vec<_>>().join("\n");
             bot.send_message(
                 msg.chat.id,
-                telegram_escape::tg_escape(&format!("Несколько записей за эту дату, уточните:\n{}", list)),
+                escape(&format!("Несколько записей за эту дату, уточните:\n{}", list)),
             ).await?;
             return Ok(());
         }
         ResolveResult::NotFound => {
-            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Запись не найдена.")).await?;
+            bot.send_message(msg.chat.id, escape("Запись не найдена.")).await?;
             return Ok(());
         }
     };
@@ -614,7 +614,7 @@ async fn handle_announce_command(
             "Запись '{}' уже была разослана {} ({} получателей). Разослать снова?",
             entry.slug, record.broadcast_at, record.recipient_count
         );
-        bot.send_message(msg.chat.id, telegram_escape::tg_escape(&text))
+        bot.send_message(msg.chat.id, escape(&text))
             .reply_markup(keyboard)
             .await?;
         return Ok(());
@@ -636,7 +636,7 @@ async fn handle_announce_command(
     db.record_news_broadcast(&entry.slug, sent_count, msg.chat.id.0, version).await?;
 
     let text = format!("Готово. Разослано {} из {} получателей.", sent_count, recipients.len());
-    bot.send_message(msg.chat.id, telegram_escape::tg_escape(&text)).await?;
+    bot.send_message(msg.chat.id, escape(&text)).await?;
 
     info!("Admin chat_id={} broadcast news '{}' to {}/{} recipients", msg.chat.id.0, entry.slug, sent_count, recipients.len());
     Ok(())
@@ -654,18 +654,18 @@ async fn handle_news_command(
     match arg.trim() {
         "off" => {
             db.set_announcements_enabled(chat_id, false).await?;
-            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Уведомления об обновлениях отключены. /news on — снова включить.")).await?;
+            bot.send_message(msg.chat.id, escape("Уведомления об обновлениях отключены. /news on — снова включить.")).await?;
             return Ok(());
         }
         "on" => {
             db.set_announcements_enabled(chat_id, true).await?;
-            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Уведомления об обновлениях включены.")).await?;
+            bot.send_message(msg.chat.id, escape("Уведомления об обновлениях включены.")).await?;
             return Ok(());
         }
         "all" => {
             let broadcasts = db.get_news_broadcasts_all().await?;
             if broadcasts.is_empty() {
-                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Новостей пока нет.")).await?;
+                bot.send_message(msg.chat.id, escape("Новостей пока нет.")).await?;
                 return Ok(());
             }
             for record in &broadcasts {
@@ -685,7 +685,7 @@ async fn handle_news_command(
     if semver_re.is_match(arg.trim()) {
         let broadcasts = db.get_news_broadcasts_by_version(arg.trim()).await?;
         if broadcasts.is_empty() {
-            bot.send_message(msg.chat.id, telegram_escape::tg_escape(&format!("Новостей для версии {} не найдено.", arg.trim()))).await?;
+            bot.send_message(msg.chat.id, escape(&format!("Новостей для версии {} не найдено.", arg.trim()))).await?;
             return Ok(());
         }
         for record in &broadcasts {
@@ -708,12 +708,12 @@ async fn handle_news_command(
                             sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false).await?;
                         }
                         None => {
-                            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Новостей пока нет.")).await?;
+                            bot.send_message(msg.chat.id, escape("Новостей пока нет.")).await?;
                         }
                     }
                 }
                 None => {
-                    bot.send_message(msg.chat.id, telegram_escape::tg_escape("Новостей пока нет.")).await?;
+                    bot.send_message(msg.chat.id, escape("Новостей пока нет.")).await?;
                 }
             }
         }
@@ -723,7 +723,7 @@ async fn handle_news_command(
                     sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false).await?;
                 }
                 None => {
-                    bot.send_message(msg.chat.id, telegram_escape::tg_escape("Эта запись ещё не была разослана.")).await?;
+                    bot.send_message(msg.chat.id, escape("Эта запись ещё не была разослана.")).await?;
                 }
             }
         }
@@ -738,11 +738,11 @@ async fn handle_news_command(
                 }
             }
             if !found {
-                bot.send_message(msg.chat.id, telegram_escape::tg_escape("Записи за эту дату ещё не были разосланы.")).await?;
+                bot.send_message(msg.chat.id, escape("Записи за эту дату ещё не были разосланы.")).await?;
             }
         }
         ResolveResult::NotFound => {
-            bot.send_message(msg.chat.id, telegram_escape::tg_escape("Не найдено.")).await?;
+            bot.send_message(msg.chat.id, escape("Не найдено.")).await?;
         }
     }
 
@@ -762,7 +762,7 @@ async fn handle_uposatha_command(
         }
         Err(uposatha::LookupError::Unknown(input)) => uposatha::format_unknown_city_error(&input),
     };
-    bot.send_message(msg.chat.id, telegram_escape::tg_escape(&text))
+    bot.send_message(msg.chat.id, escape(&text))
         .await?;
     info!("Chat id={} handled uposatha command (arg={:?})", msg.chat.id.0, arg);
     Ok(())

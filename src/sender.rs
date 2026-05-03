@@ -6,7 +6,7 @@ use std::fs;
 use std::fs::DirEntry;
 use std::path::PathBuf;
 use teloxide::payloads::SendMessageSetters;
-use telegram_escape::tg_escape;
+use teloxide::utils::markdown::escape as tg_escape;
 use teloxide::requests::Requester;
 use teloxide::types::ChatId;
 use teloxide::types::ParseMode;

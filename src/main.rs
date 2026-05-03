@@ -10,6 +10,7 @@ use teloxide::{
     dispatching::dialogue::GetChatId,
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, Me},
+    utils::markdown::escape,
 };
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
@@ -116,13 +117,13 @@ async fn callback_handler(
                     if let Some(chat_id) = admin_chat_id {
                         db.record_news_broadcast(slug, sent_count, chat_id.0, version).await?;
                         let text = format!("Готово. Разослано {} из {} получателей.", sent_count, recipients.len());
-                        bot.send_message(chat_id, telegram_escape::tg_escape(&text)).await?;
+                        bot.send_message(chat_id, escape(&text)).await?;
                     }
                     info!("Force-rebroadcast news '{}': {}/{} sent", slug, sent_count, recipients.len());
                 }
                 Ok(None) => {
                     if let Some(chat_id) = admin_chat_id {
-                        bot.send_message(chat_id, telegram_escape::tg_escape("Запись не найдена.")).await?;
+                        bot.send_message(chat_id, escape("Запись не найдена.")).await?;
                     }
                 }
                 Err(e) => {
