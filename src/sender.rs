@@ -5,17 +5,17 @@ use rand::seq::IteratorRandom;
 use std::fs;
 use std::fs::DirEntry;
 use std::path::PathBuf;
+use telegram_escape::tg_escape;
 use teloxide::payloads::SendMessageSetters;
-use teloxide::utils::markdown::escape as tg_escape;
 use teloxide::requests::Requester;
 use teloxide::types::ChatId;
 use teloxide::types::ParseMode;
 use teloxide::RequestError;
 use thiserror::Error;
 
-use teloxide::Bot;
 use teloxide::types::InlineKeyboardButton;
 use teloxide::types::InlineKeyboardMarkup;
+use teloxide::Bot;
 
 use crate::helpers::TELEGRAM_TEXT_MAX_LENGTH;
 

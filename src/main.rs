@@ -6,11 +6,11 @@ use helpers::list_files;
 use log::{debug, error, info, warn};
 use std::path::PathBuf;
 use std::{env, error::Error, path::Path, sync::Arc};
+use telegram_escape::tg_escape;
 use teloxide::{
     dispatching::dialogue::GetChatId,
     prelude::*,
     types::{InlineKeyboardButton, InlineKeyboardMarkup, Me, ParseMode},
-    utils::markdown::escape,
 };
 use tokio::signal::unix::{signal, SignalKind};
 use tokio::sync::mpsc;
@@ -127,7 +127,7 @@ async fn callback_handler(
                             sent_count,
                             recipients.len()
                         );
-                        bot.send_message(chat_id, escape(&text))
+                        bot.send_message(chat_id, tg_escape(&text))
                             .parse_mode(ParseMode::MarkdownV2)
                             .await?;
                     }
@@ -140,7 +140,7 @@ async fn callback_handler(
                 }
                 Ok(None) => {
                     if let Some(chat_id) = admin_chat_id {
-                        bot.send_message(chat_id, escape("Запись не найдена."))
+                        bot.send_message(chat_id, tg_escape("Запись не найдена."))
                             .parse_mode(ParseMode::MarkdownV2)
                             .await?;
                     }

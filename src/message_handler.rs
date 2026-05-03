@@ -12,10 +12,11 @@ use regex::Regex;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use telegram_escape::tg_escape;
 use teloxide::prelude::*;
 use teloxide::types::Me;
 use teloxide::types::ParseMode;
-use teloxide::utils::{command::BotCommands, markdown::escape};
+use teloxide::utils::command::BotCommands;
 
 #[derive(BotCommands)]
 #[command(rename_rule = "lowercase")]
@@ -49,7 +50,7 @@ enum Command {
 }
 
 async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
-    bot.send_message(msg.chat.id, escape(&Command::descriptions().to_string()))
+    bot.send_message(msg.chat.id, tg_escape(&Command::descriptions().to_string()))
         .parse_mode(ParseMode::MarkdownV2)
         .await?;
 
@@ -103,13 +104,13 @@ async fn handle_dana_command(
 async fn handle_start_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
     bot.send_message(
         msg.chat.id,
-        escape("Нажмите подписаться чтобы получать каждый день сутту из сайта theravada.ru"),
+        tg_escape("Нажмите подписаться чтобы получать каждый день сутту из сайта theravada.ru"),
     )
     .parse_mode(ParseMode::MarkdownV2)
     .await?;
 
     let keyboard = make_keyboard();
-    bot.send_message(msg.chat.id, escape("Выберите действие:"))
+    bot.send_message(msg.chat.id, tg_escape("Выберите действие:"))
         .parse_mode(ParseMode::MarkdownV2)
         .reply_markup(keyboard)
         .await?;
@@ -139,7 +140,7 @@ async fn handle_unsubscribe_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, escape("Вы уже отписаны от рассылки"))
+                bot.send_message(msg.chat.id, tg_escape("Вы уже отписаны от рассылки"))
                     .parse_mode(ParseMode::MarkdownV2)
                     .await?;
             } else {
@@ -150,7 +151,7 @@ async fn handle_unsubscribe_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, escape("Вы отписались от рассылки"))
+                bot.send_message(msg.chat.id, tg_escape("Вы отписались от рассылки"))
                     .parse_mode(ParseMode::MarkdownV2)
                     .await?;
             }
@@ -161,7 +162,7 @@ async fn handle_unsubscribe_command(
                 chat_id,
                 msg.chat.title().unwrap_or("")
             );
-            bot.send_message(msg.chat.id, escape("Вы не подписаны на рассылку"))
+            bot.send_message(msg.chat.id, tg_escape("Вы не подписаны на рассылку"))
                 .parse_mode(ParseMode::MarkdownV2)
                 .await?;
         }
@@ -186,7 +187,7 @@ async fn handle_subscribe_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, escape("Вы уже подписаны на рассылку"))
+                bot.send_message(msg.chat.id, tg_escape("Вы уже подписаны на рассылку"))
                     .parse_mode(ParseMode::MarkdownV2)
                     .await?;
             } else {
@@ -199,7 +200,9 @@ async fn handle_subscribe_command(
                 );
                 bot.send_message(
                     msg.chat.id,
-                    escape("Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве"),
+                    tg_escape(
+                        "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве",
+                    ),
                 )
                 .parse_mode(ParseMode::MarkdownV2)
                 .await?;
@@ -222,7 +225,7 @@ async fn handle_subscribe_command(
             );
             bot.send_message(
                 msg.chat.id,
-                escape("Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве"),
+                tg_escape("Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве"),
             )
             .parse_mode(ParseMode::MarkdownV2)
             .await?;
@@ -300,7 +303,7 @@ async fn handle_set_time_command(
     if times.is_empty() {
         bot.send_message(
             msg.chat.id,
-            escape("Укажите время рассылки в формате 6:00 8:18 19:31"),
+            tg_escape("Укажите время рассылки в формате 6:00 8:18 19:31"),
         )
         .parse_mode(ParseMode::MarkdownV2)
         .await?;
@@ -311,7 +314,7 @@ async fn handle_set_time_command(
     if times.len() > MAX_SENDOUT_TIMES {
         bot.send_message(
             msg.chat.id,
-            escape(&format!(
+            tg_escape(&format!(
                 "Максимальное количество времени рассылки - {} раз в сутки.",
                 MAX_SENDOUT_TIMES
             )),
@@ -331,7 +334,7 @@ async fn handle_set_time_command(
                     chat_id,
                     msg.chat.title().unwrap_or("")
                 );
-                bot.send_message(msg.chat.id, escape("Вы не подписаны на рассылку"))
+                bot.send_message(msg.chat.id, tg_escape("Вы не подписаны на рассылку"))
                     .parse_mode(ParseMode::MarkdownV2)
                     .await?;
             } else {
@@ -344,7 +347,7 @@ async fn handle_set_time_command(
                 );
                 bot.send_message(
                     msg.chat.id,
-                    escape("Время рассылки изменено. Вы будете получать новую сутту каждый день в указанное время"),
+                    tg_escape("Время рассылки изменено. Вы будете получать новую сутту каждый день в указанное время"),
                 )
                 .parse_mode(ParseMode::MarkdownV2)
                 .await?;
@@ -356,7 +359,7 @@ async fn handle_set_time_command(
                 chat_id,
                 msg.chat.title().unwrap_or("")
             );
-            bot.send_message(msg.chat.id, escape("Вы не подписаны на рассылку"))
+            bot.send_message(msg.chat.id, tg_escape("Вы не подписаны на рассылку"))
                 .parse_mode(ParseMode::MarkdownV2)
                 .await?;
         }
@@ -556,7 +559,7 @@ async fn handle_get_command(
     if query.is_empty() {
         bot.send_message(
             msg.chat.id,
-            escape("Пожалуйста, укажите название сутты для поиска, например: /get МН 65"),
+            tg_escape("Пожалуйста, укажите название сутты для поиска, например: /get МН 65"),
         )
         .parse_mode(ParseMode::MarkdownV2)
         .await?;
@@ -578,14 +581,14 @@ async fn handle_get_command(
         Ok(None) => {
             bot.send_message(
                 msg.chat.id,
-                escape(&format!("Сутта '{}' не найдена.", query)),
+                tg_escape(&format!("Сутта '{}' не найдена.", query)),
             )
             .parse_mode(ParseMode::MarkdownV2)
             .await?;
         }
         Err(e) => {
             warn!("Error searching for sutta: {}", e);
-            bot.send_message(msg.chat.id, escape("Произошла ошибка при поиске сутты."))
+            bot.send_message(msg.chat.id, tg_escape("Произошла ошибка при поиске сутты."))
                 .parse_mode(ParseMode::MarkdownV2)
                 .await?;
         }
@@ -606,7 +609,7 @@ async fn handle_announce_command(
         None => {
             bot.send_message(
                 msg.chat.id,
-                escape("Команда доступна только в личном чате."),
+                tg_escape("Команда доступна только в личном чате."),
             )
             .parse_mode(ParseMode::MarkdownV2)
             .await?;
@@ -617,7 +620,7 @@ async fn handle_announce_command(
     if !config.is_admin(from) {
         bot.send_message(
             msg.chat.id,
-            escape("Команда доступна только администраторам."),
+            tg_escape("Команда доступна только администраторам."),
         )
         .parse_mode(ParseMode::MarkdownV2)
         .await?;
@@ -634,7 +637,7 @@ async fn handle_announce_command(
             None => {
                 bot.send_message(
                     msg.chat.id,
-                    escape("Нет новостных записей в директории news/."),
+                    tg_escape("Нет новостных записей в директории news/."),
                 )
                 .parse_mode(ParseMode::MarkdownV2)
                 .await?;
@@ -650,7 +653,7 @@ async fn handle_announce_command(
                 .join("\n");
             bot.send_message(
                 msg.chat.id,
-                escape(&format!(
+                tg_escape(&format!(
                     "Несколько записей за эту дату, уточните:\n{}",
                     list
                 )),
@@ -660,7 +663,7 @@ async fn handle_announce_command(
             return Ok(());
         }
         ResolveResult::NotFound => {
-            bot.send_message(msg.chat.id, escape("Запись не найдена."))
+            bot.send_message(msg.chat.id, tg_escape("Запись не найдена."))
                 .parse_mode(ParseMode::MarkdownV2)
                 .await?;
             return Ok(());
@@ -678,7 +681,7 @@ async fn handle_announce_command(
             "Запись '{}' уже была разослана {} ({} получателей). Разослать снова?",
             entry.slug, record.broadcast_at, record.recipient_count
         );
-        bot.send_message(msg.chat.id, escape(&text))
+        bot.send_message(msg.chat.id, tg_escape(&text))
             .parse_mode(ParseMode::MarkdownV2)
             .reply_markup(keyboard)
             .await?;
@@ -710,7 +713,7 @@ async fn handle_announce_command(
         sent_count,
         recipients.len()
     );
-    bot.send_message(msg.chat.id, escape(&text))
+    bot.send_message(msg.chat.id, tg_escape(&text))
         .parse_mode(ParseMode::MarkdownV2)
         .await?;
 
@@ -738,7 +741,7 @@ async fn handle_news_command(
             db.set_announcements_enabled(chat_id, false).await?;
             bot.send_message(
                 msg.chat.id,
-                escape("Уведомления об обновлениях отключены. /news on — снова включить."),
+                tg_escape("Уведомления об обновлениях отключены. /news on — снова включить."),
             )
             .parse_mode(ParseMode::MarkdownV2)
             .await?;
@@ -746,15 +749,18 @@ async fn handle_news_command(
         }
         "on" => {
             db.set_announcements_enabled(chat_id, true).await?;
-            bot.send_message(msg.chat.id, escape("Уведомления об обновлениях включены."))
-                .parse_mode(ParseMode::MarkdownV2)
-                .await?;
+            bot.send_message(
+                msg.chat.id,
+                tg_escape("Уведомления об обновлениях включены."),
+            )
+            .parse_mode(ParseMode::MarkdownV2)
+            .await?;
             return Ok(());
         }
         "all" => {
             let broadcasts = db.get_news_broadcasts_all().await?;
             if broadcasts.is_empty() {
-                bot.send_message(msg.chat.id, escape("Новостей пока нет."))
+                bot.send_message(msg.chat.id, tg_escape("Новостей пока нет."))
                     .parse_mode(ParseMode::MarkdownV2)
                     .await?;
                 return Ok(());
@@ -791,7 +797,7 @@ async fn handle_news_command(
         if broadcasts.is_empty() {
             bot.send_message(
                 msg.chat.id,
-                escape(&format!("Новостей для версии {} не найдено.", arg.trim())),
+                tg_escape(&format!("Новостей для версии {} не найдено.", arg.trim())),
             )
             .parse_mode(ParseMode::MarkdownV2)
             .await?;
@@ -823,13 +829,13 @@ async fn handle_news_command(
                         .await?;
                 }
                 None => {
-                    bot.send_message(msg.chat.id, escape("Новостей пока нет."))
+                    bot.send_message(msg.chat.id, tg_escape("Новостей пока нет."))
                         .parse_mode(ParseMode::MarkdownV2)
                         .await?;
                 }
             },
             None => {
-                bot.send_message(msg.chat.id, escape("Новостей пока нет."))
+                bot.send_message(msg.chat.id, tg_escape("Новостей пока нет."))
                     .parse_mode(ParseMode::MarkdownV2)
                     .await?;
             }
@@ -840,7 +846,7 @@ async fn handle_news_command(
                     .await?;
             }
             None => {
-                bot.send_message(msg.chat.id, escape("Эта запись ещё не была разослана."))
+                bot.send_message(msg.chat.id, tg_escape("Эта запись ещё не была разослана."))
                     .parse_mode(ParseMode::MarkdownV2)
                     .await?;
             }
@@ -870,14 +876,14 @@ async fn handle_news_command(
             if !found {
                 bot.send_message(
                     msg.chat.id,
-                    escape("Записи за эту дату ещё не были разосланы."),
+                    tg_escape("Записи за эту дату ещё не были разосланы."),
                 )
                 .parse_mode(ParseMode::MarkdownV2)
                 .await?;
             }
         }
         ResolveResult::NotFound => {
-            bot.send_message(msg.chat.id, escape("Не найдено."))
+            bot.send_message(msg.chat.id, tg_escape("Не найдено."))
                 .parse_mode(ParseMode::MarkdownV2)
                 .await?;
         }
@@ -899,7 +905,7 @@ async fn handle_uposatha_command(
         }
         Err(uposatha::LookupError::Unknown(input)) => uposatha::format_unknown_city_error(&input),
     };
-    bot.send_message(msg.chat.id, escape(&text))
+    bot.send_message(msg.chat.id, tg_escape(&text))
         .parse_mode(ParseMode::MarkdownV2)
         .await?;
     info!(
