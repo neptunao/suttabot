@@ -56,13 +56,14 @@ The bot runs two concurrent tasks via `tokio::spawn`:
 ### Source modules
 
 - `main.rs` — entrypoint, wires up both tasks, defines inline keyboard builders and `callback_handler` for subscribe/unsubscribe/news-optout/announce-force button presses
-- `message_handler.rs` — parses bot commands (`/start`, `/subscribe`, `/unsubscribe`, `/random`, `/get`, `/settime`, `/dana`, `/announce`, `/news`, `/help`) and dispatches to per-command handlers; also contains sutta file search logic (`find_sutta_file`) supporting both Latin and Cyrillic collection codes (e.g. `МН 65` → `mn65`)
+- `message_handler.rs` — parses bot commands (`/start`, `/subscribe`, `/unsubscribe`, `/random`, `/get`, `/settime`, `/dana`, `/announce`, `/news`, `/uposatha`, `/help`) and dispatches to per-command handlers; also contains sutta file search logic (`find_sutta_file`) supporting both Latin and Cyrillic collection codes (e.g. `МН 65` → `mn65`)
 - `sender.rs` — reads a `.md` file, escapes it with `telegram_escape::tg_escape`, splits it into ≤4096-char chunks (without breaking escape sequences), and sends via MarkdownV2. `send_announcement` adds a bold header with version and an optional opt-out inline button. Defines `TgMessageSendError` for typed retry logic.
 - `db.rs` — `DbService` wrapping `SqlitePool`; all DB operations live here
 - `dto.rs` — `SubscriptionDto` and `NewsBroadcastDto` structs
 - `helpers.rs` — constants and `list_files`
 - `news.rs` — reads `news/*.md` files, parses filenames (`YYYY-MM-DD-slug.md`), validates slug uniqueness, and resolves user-supplied identifiers (slug, date, full filename) to `NewsEntry` structs
 - `config.rs` — loads `config.yaml` at startup; `Config::is_admin(&User)` checks admin access by `user_id` or `username`
+- `uposatha.rs` — `/uposatha` command logic: computes upcoming lunar phase events via `solunatus::astro::moon::lunar_phases`, resolves city/timezone argument (Russian and English aliases → `solunatus::city::CityDatabase` → curated fallback table of ~55 cities covering all Russian TZs, EU capitals, US zones, Buddhist countries), formats the reply in Russian
 
 ### Database
 

@@ -26,6 +26,7 @@ mod helpers;
 mod message_handler;
 mod news;
 mod sender;
+mod uposatha;
 
 const RETRY_LIMIT: u8 = 5;
 const RETRY_INTERVAL_SEC: u64 = 5;

@@ -39,6 +39,8 @@ enum Command {
     Announce(String),
     #[command(description = "что нового в боте; /news all — вся история; /news off/on — отключить/включить")]
     News(String),
+    #[command(description = "дни Упосатхи на ближайшие 30 дней; /uposatha <город> — для другого часового пояса (по умолчанию Москва)")]
+    Uposatha(String),
 }
 
 async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -747,6 +749,25 @@ async fn handle_news_command(
     Ok(())
 }
 
+async fn handle_uposatha_command(
+    bot: Bot,
+    msg: Message,
+    arg: String,
+) -> Result<(), Box<dyn Error + Send + Sync>> {
+    use crate::uposatha;
+    let text = match uposatha::resolve_location(&arg) {
+        Ok(loc) => {
+            let events = uposatha::upcoming_uposathas(chrono::Utc::now(), &loc, 30);
+            uposatha::format_message(&loc, &events)
+        }
+        Err(uposatha::LookupError::Unknown(input)) => uposatha::format_unknown_city_error(&input),
+    };
+    bot.send_message(msg.chat.id, telegram_escape::tg_escape(&text))
+        .await?;
+    info!("Chat id={} handled uposatha command (arg={:?})", msg.chat.id.0, arg);
+    Ok(())
+}
+
 pub async fn message_handler(
     bot: Bot,
     msg: Message,
@@ -783,6 +804,9 @@ pub async fn message_handler(
             }
             Ok(Command::News(arg)) => {
                 handle_news_command(bot.clone(), msg.clone(), db.clone(), arg).await?
+            }
+            Ok(Command::Uposatha(arg)) => {
+                handle_uposatha_command(bot.clone(), msg.clone(), arg).await?
             }
             Err(_) => {
                 if text.starts_with('/') {

@@ -50,6 +50,7 @@ docker run -d --name=suttabot -e RUST_LOG=info -e TELOXIDE_TOKEN="<TELOXIDE_TOKE
 | `/news all` | Show the full announcement history |
 | `/news <slug\|date\|version>` | Show a specific announcement by slug, date (`2026-05-02`), filename, or version (`v1.2.0`) |
 | `/news off` / `/news on` | Opt out of or back into announcement broadcasts |
+| `/uposatha` | List lunar Uposatha days in the next 30 days (Moscow time by default). Accepts Russian and English city names, e.g. `/uposatha Бангкок` or `/uposatha Berlin`. |
 | `/announce` | **(admin)** Broadcast the latest news entry to all subscribers |
 | `/announce <slug\|date\|filename>` | **(admin)** Broadcast a specific news entry |
 | `/help` | List all available commands |

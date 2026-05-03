@@ -18,3 +18,5 @@ regex = "1.12.2"
 telegram-escape="0.4.0"
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
+solunatus = "0.4.0"
+chrono-tz = "0.10.4"
