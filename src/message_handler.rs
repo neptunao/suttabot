@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::Me;
+use teloxide::types::ParseMode;
 use teloxide::utils::{command::BotCommands, markdown::escape};
 
 #[derive(BotCommands)]
@@ -37,14 +38,19 @@ enum Command {
     Dana,
     #[command(description = "(админ) разослать новость; /announce <slug|дата|файл> — конкретную")]
     Announce(String),
-    #[command(description = "что нового в боте; /news all — вся история; /news off/on — отключить/включить")]
+    #[command(
+        description = "что нового в боте; /news all — вся история; /news off/on — отключить/включить"
+    )]
     News(String),
-    #[command(description = "дни Упосатхи на ближайшие 30 дней; /uposatha <город> — для другого часового пояса (по умолчанию Москва)")]
+    #[command(
+        description = "дни Упосатхи на ближайшие 30 дней; /uposatha <город> — для другого часового пояса (по умолчанию Москва)"
+    )]
     Uposatha(String),
 }
 
 async fn handle_help_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Error + Send + Sync>> {
     bot.send_message(msg.chat.id, escape(&Command::descriptions().to_string()))
+        .parse_mode(ParseMode::MarkdownV2)
         .await?;
 
     info!(
@@ -61,14 +67,18 @@ async fn handle_dana_command(
     msg: Message,
     db: Arc<DbService>,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
-    use std::time::{SystemTime, UNIX_EPOCH};
     use crate::helpers::DONATION_FILE_PATH;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     // Send donation info WITHOUT a sutta
     let donation_file = PathBuf::from(DONATION_FILE_PATH);
 
     if let Err(e) = send_file_text_to_chat(&bot, msg.chat.id.0, donation_file).await {
-        log::error!("Failed to send donation info to chat_id={}: {:?}", msg.chat.id, e);
+        log::error!(
+            "Failed to send donation info to chat_id={}: {:?}",
+            msg.chat.id,
+            e
+        );
         return Err(Box::new(e));
     }
 
@@ -79,7 +89,11 @@ async fn handle_dana_command(
         .as_secs() as i64;
 
     if let Err(e) = db.update_donation_reminder(msg.chat.id.0, timestamp).await {
-        log::error!("Failed to update donation reminder for chat_id={}: {:?}", msg.chat.id, e);
+        log::error!(
+            "Failed to update donation reminder for chat_id={}: {:?}",
+            msg.chat.id,
+            e
+        );
     }
 
     info!("Chat id={} handled dana command", msg.chat.id.0);
@@ -91,10 +105,12 @@ async fn handle_start_command(bot: Bot, msg: Message) -> Result<(), Box<dyn Erro
         msg.chat.id,
         escape("Нажмите подписаться чтобы получать каждый день сутту из сайта theravada.ru"),
     )
+    .parse_mode(ParseMode::MarkdownV2)
     .await?;
 
     let keyboard = make_keyboard();
     bot.send_message(msg.chat.id, escape("Выберите действие:"))
+        .parse_mode(ParseMode::MarkdownV2)
         .reply_markup(keyboard)
         .await?;
 
@@ -124,6 +140,7 @@ async fn handle_unsubscribe_command(
                     msg.chat.title().unwrap_or("")
                 );
                 bot.send_message(msg.chat.id, escape("Вы уже отписаны от рассылки"))
+                    .parse_mode(ParseMode::MarkdownV2)
                     .await?;
             } else {
                 db.set_subscription_enabled(chat_id, 0, Utc::now().timestamp())
@@ -134,6 +151,7 @@ async fn handle_unsubscribe_command(
                     msg.chat.title().unwrap_or("")
                 );
                 bot.send_message(msg.chat.id, escape("Вы отписались от рассылки"))
+                    .parse_mode(ParseMode::MarkdownV2)
                     .await?;
             }
         }
@@ -144,6 +162,7 @@ async fn handle_unsubscribe_command(
                 msg.chat.title().unwrap_or("")
             );
             bot.send_message(msg.chat.id, escape("Вы не подписаны на рассылку"))
+                .parse_mode(ParseMode::MarkdownV2)
                 .await?;
         }
     }
@@ -168,6 +187,7 @@ async fn handle_subscribe_command(
                     msg.chat.title().unwrap_or("")
                 );
                 bot.send_message(msg.chat.id, escape("Вы уже подписаны на рассылку"))
+                    .parse_mode(ParseMode::MarkdownV2)
                     .await?;
             } else {
                 db.set_subscription_enabled(chat_id, 1, Utc::now().timestamp())
@@ -181,12 +201,17 @@ async fn handle_subscribe_command(
                     msg.chat.id,
                     escape("Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве"),
                 )
+                .parse_mode(ParseMode::MarkdownV2)
                 .await?;
             }
         }
         None => {
             // Initialize sendout_count to DONATION_MESSAGE_PERIOD - 1 so first donation occurs after first sent sutta
-            let initial_sendout = if donation_period > 0 { donation_period - 1 } else { 0 };
+            let initial_sendout = if donation_period > 0 {
+                donation_period - 1
+            } else {
+                0
+            };
 
             db.create_subscription(chat_id, 1, Utc::now().timestamp(), initial_sendout)
                 .await?;
@@ -199,6 +224,7 @@ async fn handle_subscribe_command(
                 msg.chat.id,
                 escape("Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве"),
             )
+            .parse_mode(ParseMode::MarkdownV2)
             .await?;
         }
     }
@@ -276,6 +302,7 @@ async fn handle_set_time_command(
             msg.chat.id,
             escape("Укажите время рассылки в формате 6:00 8:18 19:31"),
         )
+        .parse_mode(ParseMode::MarkdownV2)
         .await?;
 
         return Ok(());
@@ -289,6 +316,7 @@ async fn handle_set_time_command(
                 MAX_SENDOUT_TIMES
             )),
         )
+        .parse_mode(ParseMode::MarkdownV2)
         .await?;
 
         return Ok(());
@@ -304,6 +332,7 @@ async fn handle_set_time_command(
                     msg.chat.title().unwrap_or("")
                 );
                 bot.send_message(msg.chat.id, escape("Вы не подписаны на рассылку"))
+                    .parse_mode(ParseMode::MarkdownV2)
                     .await?;
             } else {
                 db.set_sendout_times(subscription.id, &times).await?;
@@ -317,6 +346,7 @@ async fn handle_set_time_command(
                     msg.chat.id,
                     escape("Время рассылки изменено. Вы будете получать новую сутту каждый день в указанное время"),
                 )
+                .parse_mode(ParseMode::MarkdownV2)
                 .await?;
             }
         }
@@ -327,6 +357,7 @@ async fn handle_set_time_command(
                 msg.chat.title().unwrap_or("")
             );
             bot.send_message(msg.chat.id, escape("Вы не подписаны на рассылку"))
+                .parse_mode(ParseMode::MarkdownV2)
                 .await?;
         }
     }
@@ -525,8 +556,9 @@ async fn handle_get_command(
     if query.is_empty() {
         bot.send_message(
             msg.chat.id,
-            "Пожалуйста, укажите название сутты для поиска, например: /get МН 65",
+            escape("Пожалуйста, укажите название сутты для поиска, например: /get МН 65"),
         )
+        .parse_mode(ParseMode::MarkdownV2)
         .await?;
         return Ok(());
     }
@@ -544,12 +576,17 @@ async fn handle_get_command(
             send_file_text_to_chat(&bot, msg.chat.id.0, file_path.clone()).await?;
         }
         Ok(None) => {
-            bot.send_message(msg.chat.id, format!("Сутта '{}' не найдена.", query))
-                .await?;
+            bot.send_message(
+                msg.chat.id,
+                escape(&format!("Сутта '{}' не найдена.", query)),
+            )
+            .parse_mode(ParseMode::MarkdownV2)
+            .await?;
         }
         Err(e) => {
             warn!("Error searching for sutta: {}", e);
-            bot.send_message(msg.chat.id, "Произошла ошибка при поиске сутты.")
+            bot.send_message(msg.chat.id, escape("Произошла ошибка при поиске сутты."))
+                .parse_mode(ParseMode::MarkdownV2)
                 .await?;
         }
     }
@@ -567,14 +604,27 @@ async fn handle_announce_command(
     let from = match msg.from() {
         Some(user) => user,
         None => {
-            bot.send_message(msg.chat.id, escape("Команда доступна только в личном чате.")).await?;
+            bot.send_message(
+                msg.chat.id,
+                escape("Команда доступна только в личном чате."),
+            )
+            .parse_mode(ParseMode::MarkdownV2)
+            .await?;
             return Ok(());
         }
     };
 
     if !config.is_admin(from) {
-        bot.send_message(msg.chat.id, escape("Команда доступна только администраторам.")).await?;
-        info!("Rejected /announce from non-admin chat_id={}", msg.chat.id.0);
+        bot.send_message(
+            msg.chat.id,
+            escape("Команда доступна только администраторам."),
+        )
+        .parse_mode(ParseMode::MarkdownV2)
+        .await?;
+        info!(
+            "Rejected /announce from non-admin chat_id={}",
+            msg.chat.id.0
+        );
         return Ok(());
     }
 
@@ -582,21 +632,37 @@ async fn handle_announce_command(
         ResolveResult::Empty => match news::latest()? {
             Some(e) => e,
             None => {
-                bot.send_message(msg.chat.id, escape("Нет новостных записей в директории news/.")).await?;
+                bot.send_message(
+                    msg.chat.id,
+                    escape("Нет новостных записей в директории news/."),
+                )
+                .parse_mode(ParseMode::MarkdownV2)
+                .await?;
                 return Ok(());
             }
         },
         ResolveResult::Single(e) => e,
         ResolveResult::MultipleByDate(entries) => {
-            let list = entries.iter().map(|e| format!("{}-{}", e.date, e.slug)).collect::<Vec<_>>().join("\n");
+            let list = entries
+                .iter()
+                .map(|e| format!("{}-{}", e.date, e.slug))
+                .collect::<Vec<_>>()
+                .join("\n");
             bot.send_message(
                 msg.chat.id,
-                escape(&format!("Несколько записей за эту дату, уточните:\n{}", list)),
-            ).await?;
+                escape(&format!(
+                    "Несколько записей за эту дату, уточните:\n{}",
+                    list
+                )),
+            )
+            .parse_mode(ParseMode::MarkdownV2)
+            .await?;
             return Ok(());
         }
         ResolveResult::NotFound => {
-            bot.send_message(msg.chat.id, escape("Запись не найдена.")).await?;
+            bot.send_message(msg.chat.id, escape("Запись не найдена."))
+                .parse_mode(ParseMode::MarkdownV2)
+                .await?;
             return Ok(());
         }
     };
@@ -604,17 +670,16 @@ async fn handle_announce_command(
     // Check for existing broadcast — show warning with "send anyway" button
     if let Some(record) = db.get_news_broadcast(&entry.slug).await? {
         use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup};
-        let keyboard = InlineKeyboardMarkup::new(vec![vec![
-            InlineKeyboardButton::callback(
-                "Отправить ещё раз".to_owned(),
-                format!("announce_force:{}", entry.slug),
-            ),
-        ]]);
+        let keyboard = InlineKeyboardMarkup::new(vec![vec![InlineKeyboardButton::callback(
+            "Отправить ещё раз".to_owned(),
+            format!("announce_force:{}", entry.slug),
+        )]]);
         let text = format!(
             "Запись '{}' уже была разослана {} ({} получателей). Разослать снова?",
             entry.slug, record.broadcast_at, record.recipient_count
         );
         bot.send_message(msg.chat.id, escape(&text))
+            .parse_mode(ParseMode::MarkdownV2)
             .reply_markup(keyboard)
             .await?;
         return Ok(());
@@ -628,17 +693,34 @@ async fn handle_announce_command(
         match sender::send_announcement(&bot, chat_id, &entry.body, version, true).await {
             Ok(()) => sent_count += 1,
             Err(e) => {
-                log::error!("Failed to send announcement to chat_id={}: {:?}", chat_id, e);
+                log::error!(
+                    "Failed to send announcement to chat_id={}: {:?}",
+                    chat_id,
+                    e
+                );
             }
         }
     }
 
-    db.record_news_broadcast(&entry.slug, sent_count, msg.chat.id.0, version).await?;
+    db.record_news_broadcast(&entry.slug, sent_count, msg.chat.id.0, version)
+        .await?;
 
-    let text = format!("Готово. Разослано {} из {} получателей.", sent_count, recipients.len());
-    bot.send_message(msg.chat.id, escape(&text)).await?;
+    let text = format!(
+        "Готово. Разослано {} из {} получателей.",
+        sent_count,
+        recipients.len()
+    );
+    bot.send_message(msg.chat.id, escape(&text))
+        .parse_mode(ParseMode::MarkdownV2)
+        .await?;
 
-    info!("Admin chat_id={} broadcast news '{}' to {}/{} recipients", msg.chat.id.0, entry.slug, sent_count, recipients.len());
+    info!(
+        "Admin chat_id={} broadcast news '{}' to {}/{} recipients",
+        msg.chat.id.0,
+        entry.slug,
+        sent_count,
+        recipients.len()
+    );
     Ok(())
 }
 
@@ -654,24 +736,46 @@ async fn handle_news_command(
     match arg.trim() {
         "off" => {
             db.set_announcements_enabled(chat_id, false).await?;
-            bot.send_message(msg.chat.id, escape("Уведомления об обновлениях отключены. /news on — снова включить.")).await?;
+            bot.send_message(
+                msg.chat.id,
+                escape("Уведомления об обновлениях отключены. /news on — снова включить."),
+            )
+            .parse_mode(ParseMode::MarkdownV2)
+            .await?;
             return Ok(());
         }
         "on" => {
             db.set_announcements_enabled(chat_id, true).await?;
-            bot.send_message(msg.chat.id, escape("Уведомления об обновлениях включены.")).await?;
+            bot.send_message(msg.chat.id, escape("Уведомления об обновлениях включены."))
+                .parse_mode(ParseMode::MarkdownV2)
+                .await?;
             return Ok(());
         }
         "all" => {
             let broadcasts = db.get_news_broadcasts_all().await?;
             if broadcasts.is_empty() {
-                bot.send_message(msg.chat.id, escape("Новостей пока нет.")).await?;
+                bot.send_message(msg.chat.id, escape("Новостей пока нет."))
+                    .parse_mode(ParseMode::MarkdownV2)
+                    .await?;
                 return Ok(());
             }
             for record in &broadcasts {
                 if let Ok(Some(entry)) = news::by_slug(&record.slug) {
-                    if let Err(e) = sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false).await {
-                        log::warn!("Failed to send /news all entry '{}' to chat_id={}: {:?}", record.slug, chat_id, e);
+                    if let Err(e) = sender::send_announcement(
+                        &bot,
+                        chat_id,
+                        &entry.body,
+                        &record.version,
+                        false,
+                    )
+                    .await
+                    {
+                        log::warn!(
+                            "Failed to send /news all entry '{}' to chat_id={}: {:?}",
+                            record.slug,
+                            chat_id,
+                            e
+                        );
                     }
                 }
             }
@@ -685,13 +789,25 @@ async fn handle_news_command(
     if semver_re.is_match(arg.trim()) {
         let broadcasts = db.get_news_broadcasts_by_version(arg.trim()).await?;
         if broadcasts.is_empty() {
-            bot.send_message(msg.chat.id, escape(&format!("Новостей для версии {} не найдено.", arg.trim()))).await?;
+            bot.send_message(
+                msg.chat.id,
+                escape(&format!("Новостей для версии {} не найдено.", arg.trim())),
+            )
+            .parse_mode(ParseMode::MarkdownV2)
+            .await?;
             return Ok(());
         }
         for record in &broadcasts {
             if let Ok(Some(entry)) = news::by_slug(&record.slug) {
-                if let Err(e) = sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false).await {
-                    log::warn!("Failed to send /news version entry to chat_id={}: {:?}", chat_id, e);
+                if let Err(e) =
+                    sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false)
+                        .await
+                {
+                    log::warn!(
+                        "Failed to send /news version entry to chat_id={}: {:?}",
+                        chat_id,
+                        e
+                    );
                 }
             }
         }
@@ -700,49 +816,70 @@ async fn handle_news_command(
 
     // Filesystem resolve (empty / slug / date / full filename)
     match news::resolve(arg.trim())? {
-        ResolveResult::Empty => {
-            match db.get_news_broadcast_latest().await? {
-                Some(record) => {
-                    match news::by_slug(&record.slug)? {
-                        Some(entry) => {
-                            sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false).await?;
-                        }
-                        None => {
-                            bot.send_message(msg.chat.id, escape("Новостей пока нет.")).await?;
-                        }
-                    }
+        ResolveResult::Empty => match db.get_news_broadcast_latest().await? {
+            Some(record) => match news::by_slug(&record.slug)? {
+                Some(entry) => {
+                    sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false)
+                        .await?;
                 }
                 None => {
-                    bot.send_message(msg.chat.id, escape("Новостей пока нет.")).await?;
+                    bot.send_message(msg.chat.id, escape("Новостей пока нет."))
+                        .parse_mode(ParseMode::MarkdownV2)
+                        .await?;
                 }
+            },
+            None => {
+                bot.send_message(msg.chat.id, escape("Новостей пока нет."))
+                    .parse_mode(ParseMode::MarkdownV2)
+                    .await?;
             }
-        }
-        ResolveResult::Single(entry) => {
-            match db.get_news_broadcast(&entry.slug).await? {
-                Some(record) => {
-                    sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false).await?;
-                }
-                None => {
-                    bot.send_message(msg.chat.id, escape("Эта запись ещё не была разослана.")).await?;
-                }
+        },
+        ResolveResult::Single(entry) => match db.get_news_broadcast(&entry.slug).await? {
+            Some(record) => {
+                sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false)
+                    .await?;
             }
-        }
+            None => {
+                bot.send_message(msg.chat.id, escape("Эта запись ещё не была разослана."))
+                    .parse_mode(ParseMode::MarkdownV2)
+                    .await?;
+            }
+        },
         ResolveResult::MultipleByDate(entries) => {
             let mut found = false;
             for entry in &entries {
                 if let Ok(Some(record)) = db.get_news_broadcast(&entry.slug).await {
                     found = true;
-                    if let Err(e) = sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false).await {
-                        log::warn!("Failed to send /news date entry to chat_id={}: {:?}", chat_id, e);
+                    if let Err(e) = sender::send_announcement(
+                        &bot,
+                        chat_id,
+                        &entry.body,
+                        &record.version,
+                        false,
+                    )
+                    .await
+                    {
+                        log::warn!(
+                            "Failed to send /news date entry to chat_id={}: {:?}",
+                            chat_id,
+                            e
+                        );
                     }
                 }
             }
             if !found {
-                bot.send_message(msg.chat.id, escape("Записи за эту дату ещё не были разосланы.")).await?;
+                bot.send_message(
+                    msg.chat.id,
+                    escape("Записи за эту дату ещё не были разосланы."),
+                )
+                .parse_mode(ParseMode::MarkdownV2)
+                .await?;
             }
         }
         ResolveResult::NotFound => {
-            bot.send_message(msg.chat.id, escape("Не найдено.")).await?;
+            bot.send_message(msg.chat.id, escape("Не найдено."))
+                .parse_mode(ParseMode::MarkdownV2)
+                .await?;
         }
     }
 
@@ -763,8 +900,12 @@ async fn handle_uposatha_command(
         Err(uposatha::LookupError::Unknown(input)) => uposatha::format_unknown_city_error(&input),
     };
     bot.send_message(msg.chat.id, escape(&text))
+        .parse_mode(ParseMode::MarkdownV2)
         .await?;
-    info!("Chat id={} handled uposatha command (arg={:?})", msg.chat.id.0, arg);
+    info!(
+        "Chat id={} handled uposatha command (arg={:?})",
+        msg.chat.id.0, arg
+    );
     Ok(())
 }
 
@@ -785,7 +926,8 @@ pub async fn message_handler(
                 handle_unsubscribe_command(bot.clone(), msg.clone(), db.clone()).await?
             }
             Ok(Command::Subscribe) => {
-                handle_subscribe_command(bot.clone(), msg.clone(), db.clone(), donation_period).await?
+                handle_subscribe_command(bot.clone(), msg.clone(), db.clone(), donation_period)
+                    .await?
             }
             Ok(Command::Random) => {
                 handle_random_command(bot.clone(), msg.clone(), data_dir.clone()).await?
@@ -796,11 +938,10 @@ pub async fn message_handler(
             Ok(Command::Get(query)) => {
                 handle_get_command(bot.clone(), msg.clone(), query, data_dir.clone()).await?
             }
-            Ok(Command::Dana) => {
-                handle_dana_command(bot.clone(), msg.clone(), db.clone()).await?
-            }
+            Ok(Command::Dana) => handle_dana_command(bot.clone(), msg.clone(), db.clone()).await?,
             Ok(Command::Announce(arg)) => {
-                handle_announce_command(bot.clone(), msg.clone(), db.clone(), config.clone(), arg).await?
+                handle_announce_command(bot.clone(), msg.clone(), db.clone(), config.clone(), arg)
+                    .await?
             }
             Ok(Command::News(arg)) => {
                 handle_news_command(bot.clone(), msg.clone(), db.clone(), arg).await?

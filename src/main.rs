@@ -9,7 +9,7 @@ use std::{env, error::Error, path::Path, sync::Arc};
 use teloxide::{
     dispatching::dialogue::GetChatId,
     prelude::*,
-    types::{InlineKeyboardButton, InlineKeyboardMarkup, Me},
+    types::{InlineKeyboardButton, InlineKeyboardMarkup, Me, ParseMode},
     utils::markdown::escape,
 };
 use tokio::signal::unix::{signal, SignalKind};
@@ -18,7 +18,9 @@ use tokio::time::{interval_at, Instant};
 
 use crate::config::Config;
 use crate::message_handler::message_handler;
-use crate::sender::{send_announcement, send_daily_message, send_file_text_to_chat, TgMessageSendError};
+use crate::sender::{
+    send_announcement, send_daily_message, send_file_text_to_chat, TgMessageSendError,
+};
 
 mod config;
 mod db;
@@ -110,20 +112,37 @@ async fn callback_handler(
                         match send_announcement(&bot, chat_id, &entry.body, version, true).await {
                             Ok(()) => sent_count += 1,
                             Err(e) => {
-                                error!("Failed to resend announcement to chat_id={}: {:?}", chat_id, e);
+                                error!(
+                                    "Failed to resend announcement to chat_id={}: {:?}",
+                                    chat_id, e
+                                );
                             }
                         }
                     }
                     if let Some(chat_id) = admin_chat_id {
-                        db.record_news_broadcast(slug, sent_count, chat_id.0, version).await?;
-                        let text = format!("Готово. Разослано {} из {} получателей.", sent_count, recipients.len());
-                        bot.send_message(chat_id, escape(&text)).await?;
+                        db.record_news_broadcast(slug, sent_count, chat_id.0, version)
+                            .await?;
+                        let text = format!(
+                            "Готово. Разослано {} из {} получателей.",
+                            sent_count,
+                            recipients.len()
+                        );
+                        bot.send_message(chat_id, escape(&text))
+                            .parse_mode(ParseMode::MarkdownV2)
+                            .await?;
                     }
-                    info!("Force-rebroadcast news '{}': {}/{} sent", slug, sent_count, recipients.len());
+                    info!(
+                        "Force-rebroadcast news '{}': {}/{} sent",
+                        slug,
+                        sent_count,
+                        recipients.len()
+                    );
                 }
                 Ok(None) => {
                     if let Some(chat_id) = admin_chat_id {
-                        bot.send_message(chat_id, escape("Запись не найдена.")).await?;
+                        bot.send_message(chat_id, escape("Запись не найдена."))
+                            .parse_mode(ParseMode::MarkdownV2)
+                            .await?;
                     }
                 }
                 Err(e) => {
@@ -181,9 +200,14 @@ async fn callback_handler(
                         None => {
                             info!("Inserting new subscription for chat_id: {}", chat_id);
 
-                            let initial_sendout = if donation_period > 0 { donation_period - 1 } else { 0 };
+                            let initial_sendout = if donation_period > 0 {
+                                donation_period - 1
+                            } else {
+                                0
+                            };
 
-                            db.create_subscription(chat_id.0, 1, timestamp, initial_sendout).await?;
+                            db.create_subscription(chat_id.0, 1, timestamp, initial_sendout)
+                                .await?;
 
                             let text = "Спасибо! Вы будете получать новую сутту каждый день в 8:00 по Москве";
 
@@ -373,14 +397,23 @@ async fn send_daily_and_maybe_donation(
             if announcements_enabled == 1 {
                 if let Ok(Some(record)) = db.get_news_broadcast_latest().await {
                     if let Ok(Some(entry)) = news::by_slug(&record.slug) {
-                        if let Err(e) = send_announcement(bot, chat_id, &entry.body, &record.version, false).await {
-                            warn!("Failed to send onboarding news to chat_id={}: {:?}", chat_id, e);
+                        if let Err(e) =
+                            send_announcement(bot, chat_id, &entry.body, &record.version, false)
+                                .await
+                        {
+                            warn!(
+                                "Failed to send onboarding news to chat_id={}: {:?}",
+                                chat_id, e
+                            );
                         }
                     }
                 }
             }
             if let Err(e) = db.set_news_onboarded(chat_id).await {
-                warn!("Failed to set news_onboarded for chat_id={}: {:?}", chat_id, e);
+                warn!(
+                    "Failed to set news_onboarded for chat_id={}: {:?}",
+                    chat_id, e
+                );
             }
         }
     }
@@ -392,15 +425,19 @@ async fn send_daily_and_maybe_donation(
     let new_count = match db.increment_sendout_count(chat_id).await {
         Ok(count) => count,
         Err(e) => {
-            log::error!("Failed to increment sendout_count for chat_id={}: {:?}", chat_id, e);
+            log::error!(
+                "Failed to increment sendout_count for chat_id={}: {:?}",
+                chat_id,
+                e
+            );
             return Ok(()); // Continue even if DB update fails
         }
     };
 
     // Check if we should send donation message (count % period == 0)
     if new_count % donation_period == 0 {
-        use std::time::{SystemTime, UNIX_EPOCH};
         use crate::helpers::DONATION_FILE_PATH;
+        use std::time::{SystemTime, UNIX_EPOCH};
 
         let donation_file = PathBuf::from(DONATION_FILE_PATH);
 
@@ -411,7 +448,11 @@ async fn send_daily_and_maybe_donation(
             Ok(duration) => {
                 let timestamp = duration.as_secs() as i64;
                 if let Err(e) = db.update_donation_reminder(chat_id, timestamp).await {
-                    log::error!("Failed to update donation tracking for chat_id={}: {:?}", chat_id, e);
+                    log::error!(
+                        "Failed to update donation tracking for chat_id={}: {:?}",
+                        chat_id,
+                        e
+                    );
                 }
             }
             Err(e) => {
@@ -419,7 +460,10 @@ async fn send_daily_and_maybe_donation(
             }
         }
 
-        info!("Sent donation message to chat_id={} (count={})", chat_id, new_count);
+        info!(
+            "Sent donation message to chat_id={} (count={})",
+            chat_id, new_count
+        );
     }
 
     Ok(())
@@ -526,8 +570,15 @@ async fn main() -> Result<(), anyhow::Error> {
     let handler = dptree::entry()
         .branch(Update::filter_message().endpoint(message_handler_fn))
         .branch(
-            Update::filter_callback_query()
-                .endpoint(move |bot: Bot, q| callback_handler(recv_db.clone(), bot.clone(), q, donation_period, recv_config.clone())),
+            Update::filter_callback_query().endpoint(move |bot: Bot, q| {
+                callback_handler(
+                    recv_db.clone(),
+                    bot.clone(),
+                    q,
+                    donation_period,
+                    recv_config.clone(),
+                )
+            }),
         );
 
     Dispatcher::builder(bot.clone(), handler)
