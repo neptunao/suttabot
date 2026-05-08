@@ -637,7 +637,10 @@ async fn handle_announce_command(
             None => {
                 bot.send_message(
                     msg.chat.id,
-                    tg_escape(&format!("Нет новостных записей в директории {}.", crate::helpers::news_dir().display())),
+                    tg_escape(&format!(
+                        "Нет новостных записей в директории {}.",
+                        crate::helpers::news_dir().display()
+                    )),
                 )
                 .parse_mode(ParseMode::MarkdownV2)
                 .await?;
@@ -689,11 +692,12 @@ async fn handle_announce_command(
     }
 
     let version = env!("CARGO_PKG_VERSION");
+    let version_label = format!("v{}", version);
     let recipients = db.get_announcement_recipients().await?;
     let mut sent_count = 0i64;
 
     for &chat_id in &recipients {
-        match sender::send_announcement(&bot, chat_id, &entry.body, version, true).await {
+        match sender::send_announcement(&bot, chat_id, &entry.body, &version_label, true).await {
             Ok(()) => sent_count += 1,
             Err(e) => {
                 log::error!(
@@ -741,7 +745,7 @@ async fn handle_news_command(
             db.set_announcements_enabled(chat_id, false).await?;
             bot.send_message(
                 msg.chat.id,
-                tg_escape("Уведомления об обновлениях отключены. /news on — снова включить."),
+                tg_escape("Рассылка обновлений отключена. /news on — снова включить."),
             )
             .parse_mode(ParseMode::MarkdownV2)
             .await?;
@@ -749,40 +753,30 @@ async fn handle_news_command(
         }
         "on" => {
             db.set_announcements_enabled(chat_id, true).await?;
-            bot.send_message(
-                msg.chat.id,
-                tg_escape("Уведомления об обновлениях включены."),
-            )
-            .parse_mode(ParseMode::MarkdownV2)
-            .await?;
+            bot.send_message(msg.chat.id, tg_escape("Рассылка обновлений включена."))
+                .parse_mode(ParseMode::MarkdownV2)
+                .await?;
             return Ok(());
         }
         "all" => {
-            let broadcasts = db.get_news_broadcasts_all().await?;
-            if broadcasts.is_empty() {
+            let entries = news::list_all()?;
+            if entries.is_empty() {
                 bot.send_message(msg.chat.id, tg_escape("Новостей пока нет."))
                     .parse_mode(ParseMode::MarkdownV2)
                     .await?;
                 return Ok(());
             }
-            for record in &broadcasts {
-                if let Ok(Some(entry)) = news::by_slug(&record.slug) {
-                    if let Err(e) = sender::send_announcement(
-                        &bot,
+            for entry in &entries {
+                let label = entry.date.to_string();
+                if let Err(e) =
+                    sender::send_announcement(&bot, chat_id, &entry.body, &label, false).await
+                {
+                    log::warn!(
+                        "Failed to send /news all entry '{}' to chat_id={}: {:?}",
+                        entry.slug,
                         chat_id,
-                        &entry.body,
-                        &record.version,
-                        false,
-                    )
-                    .await
-                    {
-                        log::warn!(
-                            "Failed to send /news all entry '{}' to chat_id={}: {:?}",
-                            record.slug,
-                            chat_id,
-                            e
-                        );
-                    }
+                        e
+                    );
                 }
             }
             return Ok(());
@@ -790,7 +784,7 @@ async fn handle_news_command(
         _ => {}
     }
 
-    // Semver lookup: v1.4.0 or 1.4.0
+    // Version lookup (v1.4.0 or 1.4.0) — only broadcasts carry a version label
     let semver_re = Regex::new(r"^v?\d+\.\d+\.\d+$").unwrap();
     if semver_re.is_match(arg.trim()) {
         let broadcasts = db.get_news_broadcasts_by_version(arg.trim()).await?;
@@ -805,9 +799,9 @@ async fn handle_news_command(
         }
         for record in &broadcasts {
             if let Ok(Some(entry)) = news::by_slug(&record.slug) {
+                let label = format!("v{}", record.version);
                 if let Err(e) =
-                    sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false)
-                        .await
+                    sender::send_announcement(&bot, chat_id, &entry.body, &label, false).await
                 {
                     log::warn!(
                         "Failed to send /news version entry to chat_id={}: {:?}",
@@ -820,66 +814,35 @@ async fn handle_news_command(
         return Ok(());
     }
 
-    // Filesystem resolve (empty / slug / date / full filename)
+    // Filesystem resolve (empty / slug / date / full filename) — no DB dependency
     match news::resolve(arg.trim())? {
-        ResolveResult::Empty => match db.get_news_broadcast_latest().await? {
-            Some(record) => match news::by_slug(&record.slug)? {
-                Some(entry) => {
-                    sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false)
-                        .await?;
-                }
-                None => {
-                    bot.send_message(msg.chat.id, tg_escape("Новостей пока нет."))
-                        .parse_mode(ParseMode::MarkdownV2)
-                        .await?;
-                }
-            },
+        ResolveResult::Empty => match news::latest()? {
+            Some(entry) => {
+                let label = entry.date.to_string();
+                sender::send_announcement(&bot, chat_id, &entry.body, &label, false).await?;
+            }
             None => {
                 bot.send_message(msg.chat.id, tg_escape("Новостей пока нет."))
                     .parse_mode(ParseMode::MarkdownV2)
                     .await?;
             }
         },
-        ResolveResult::Single(entry) => match db.get_news_broadcast(&entry.slug).await? {
-            Some(record) => {
-                sender::send_announcement(&bot, chat_id, &entry.body, &record.version, false)
-                    .await?;
-            }
-            None => {
-                bot.send_message(msg.chat.id, tg_escape("Эта запись ещё не была разослана."))
-                    .parse_mode(ParseMode::MarkdownV2)
-                    .await?;
-            }
-        },
+        ResolveResult::Single(entry) => {
+            let label = entry.date.to_string();
+            sender::send_announcement(&bot, chat_id, &entry.body, &label, false).await?;
+        }
         ResolveResult::MultipleByDate(entries) => {
-            let mut found = false;
             for entry in &entries {
-                if let Ok(Some(record)) = db.get_news_broadcast(&entry.slug).await {
-                    found = true;
-                    if let Err(e) = sender::send_announcement(
-                        &bot,
+                let label = entry.date.to_string();
+                if let Err(e) =
+                    sender::send_announcement(&bot, chat_id, &entry.body, &label, false).await
+                {
+                    log::warn!(
+                        "Failed to send /news date entry to chat_id={}: {:?}",
                         chat_id,
-                        &entry.body,
-                        &record.version,
-                        false,
-                    )
-                    .await
-                    {
-                        log::warn!(
-                            "Failed to send /news date entry to chat_id={}: {:?}",
-                            chat_id,
-                            e
-                        );
-                    }
+                        e
+                    );
                 }
-            }
-            if !found {
-                bot.send_message(
-                    msg.chat.id,
-                    tg_escape("Записи за эту дату ещё не были разосланы."),
-                )
-                .parse_mode(ParseMode::MarkdownV2)
-                .await?;
             }
         }
         ResolveResult::NotFound => {

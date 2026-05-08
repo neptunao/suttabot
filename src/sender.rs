@@ -109,7 +109,7 @@ pub async fn send_announcement(
     with_optout_button: bool,
 ) -> Result<(), TgMessageSendError> {
     let escaped_version = tg_escape(version);
-    let header = format!("📜 *Что нового* — v{}\n\n", escaped_version);
+    let header = format!("📜 *Что нового* — {}\n\n", escaped_version);
     let escaped_body = tg_escape(body);
     let full_text = format!("{}{}", header, escaped_body);
 

@@ -106,10 +106,13 @@ async fn callback_handler(
             match news::by_slug(slug) {
                 Ok(Some(entry)) => {
                     let version = env!("CARGO_PKG_VERSION");
+                    let version_label = format!("v{}", version);
                     let recipients = db.get_announcement_recipients().await?;
                     let mut sent_count = 0i64;
                     for &chat_id in &recipients {
-                        match send_announcement(&bot, chat_id, &entry.body, version, true).await {
+                        match send_announcement(&bot, chat_id, &entry.body, &version_label, true)
+                            .await
+                        {
                             Ok(()) => sent_count += 1,
                             Err(e) => {
                                 error!(
@@ -395,17 +398,15 @@ async fn send_daily_and_maybe_donation(
     {
         if news_onboarded == 0 {
             if announcements_enabled == 1 {
-                if let Ok(Some(record)) = db.get_news_broadcast_latest().await {
-                    if let Ok(Some(entry)) = news::by_slug(&record.slug) {
-                        if let Err(e) =
-                            send_announcement(bot, chat_id, &entry.body, &record.version, false)
-                                .await
-                        {
-                            warn!(
-                                "Failed to send onboarding news to chat_id={}: {:?}",
-                                chat_id, e
-                            );
-                        }
+                if let Ok(Some(entry)) = news::latest() {
+                    let label = entry.date.to_string();
+                    if let Err(e) =
+                        send_announcement(bot, chat_id, &entry.body, &label, false).await
+                    {
+                        warn!(
+                            "Failed to send onboarding news to chat_id={}: {:?}",
+                            chat_id, e
+                        );
                     }
                 }
             }

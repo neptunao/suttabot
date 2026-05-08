@@ -70,10 +70,11 @@ docker run -d --name=suttabot -e RUST_LOG=info -e TELOXIDE_TOKEN="<TELOXIDE_TOKE
 | `/get <id>` | Find and send a sutta by number, e.g. `/get МН 65` or `/get mn65`. Supports Latin and Cyrillic collection codes (MN, SN, AN, DN, and their Russian equivalents). |
 | `/settime <times>` | Set daily delivery times, e.g. `/settime 6:00 8:18 19:31`. Up to 10 times per day. Requires an active subscription. (**not yet implemented** — times are saved but ignored; delivery is fixed at 08:00 Moscow time) |
 | `/dana` | Show donation information for Dhamma centres |
-| `/news` | Show the latest "what's new" announcement |
-| `/news all` | Show the full announcement history |
-| `/news <slug\|date\|version>` | Show a specific announcement by slug, date (`2026-05-02`), filename, or version (`v1.2.0`) |
-| `/news off` / `/news on` | Opt out of or back into announcement broadcasts |
+| `/news` | Show the latest news entry |
+| `/news all` | Show all news entries |
+| `/news <slug\|date\|filename>` | Show a specific news entry by slug, date (`2026-05-02`), or filename |
+| `/news <version>` | Show the news entry that was broadcast with a given bot version (`v1.2.0`) |
+| `/news off` / `/news on` | Opt out of or back into broadcast pushes from `/announce` |
 | `/uposatha` | List lunar Uposatha days in the next 30 days (Moscow time by default). Accepts Russian and English city names, e.g. `/uposatha Бангкок` or `/uposatha Berlin`. |
 | `/announce` | **(admin)** Broadcast the latest news entry to all subscribers |
 | `/announce <slug\|date\|filename>` | **(admin)** Broadcast a specific news entry |
@@ -90,9 +91,16 @@ Versioning is automated via [release-plz](https://release-plz.dev/). Commit mess
 
 On every push to `main`, `release-plz` opens or updates a release PR that accumulates commits and bumps `Cargo.toml`. Merging the PR creates a git tag and a GitHub Release with a grouped technical changelog. No manual version editing required.
 
-## Announcements (What's New)
+## News and Broadcasts
 
-User-facing "what's new" entries are separate from technical releases. Add a file to `data/ru/news/` when there is something users would care about (new command, new content source, etc.). Technical releases (refactors, CI changes, deps) do not need an entry.
+These are two separate streams:
+
+- **News** (user pull) — users request news via `/news`. Reads directly from `data/ru/news/` files. Available immediately after deploy; does not require `/announce` to have been run.
+- **Broadcasts** (admin push) — admin runs `/announce` to push the latest news entry to all opted-in subscribers. This is a one-time push; it records what was sent and at which bot version in the DB.
+
+Users can opt out of broadcast pushes with `/news off` without losing access to the `/news` pull commands.
+
+### Adding a news entry
 
 **Naming convention:** `data/ru/news/<YYYY-MM-DD>-<slug>.md`
 - `<slug>` must be kebab-case (`[a-z0-9]+(-[a-z0-9]+)*`), e.g. `random-command`, `an-collection-added`
@@ -102,7 +110,7 @@ User-facing "what's new" entries are separate from technical releases. Add a fil
 1. Write the entry in `data/ru/news/` in plain Russian markdown (no header — the bot adds one automatically)
 2. Commit, open PR, merge
 3. Deploy (the Docker build triggers automatically on merge to main)
-4. Run `/announce` from an admin account in Telegram — broadcasts to all opted-in subscribers
+4. *(Optional)* Run `/announce` from an admin account to push it to all opted-in subscribers
 
 **Re-broadcasting:** running `/announce slug` a second time shows a warning with the prior timestamp. An inline "Send again" button allows a deliberate re-broadcast.
 
