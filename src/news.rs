@@ -4,9 +4,8 @@ use regex::Regex;
 use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::fs;
-use std::path::Path;
 
-use crate::helpers::NEWS_DIR;
+use crate::helpers::news_dir;
 
 #[derive(Debug, Clone)]
 pub struct NewsEntry {
@@ -49,12 +48,12 @@ fn is_valid_slug(slug: &str) -> bool {
 }
 
 pub fn list_all() -> Result<Vec<NewsEntry>> {
-    let dir = Path::new(NEWS_DIR);
+    let dir = news_dir();
     if !dir.exists() {
         return Ok(vec![]);
     }
 
-    let mut entries: Vec<NewsEntry> = fs::read_dir(dir)?
+    let mut entries: Vec<NewsEntry> = fs::read_dir(&dir)?
         .filter_map(|e| e.ok())
         .filter(|e| {
             e.file_type().map(|ft| ft.is_file()).unwrap_or(false)
@@ -82,8 +81,9 @@ pub fn validate_all() -> Result<()> {
     for entry in &entries {
         if !seen.insert(entry.slug.clone()) {
             return Err(anyhow!(
-                "Duplicate slug '{}' found in news/ directory — each slug must be unique",
-                entry.slug
+                "Duplicate slug '{}' found in {} — each slug must be unique",
+                entry.slug,
+                news_dir().display()
             ));
         }
     }

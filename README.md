@@ -22,7 +22,31 @@ Sutta texts are included in the `data/ru/` directory.
 
 ### Without Docker
 
-1. Set the required environment variables
+#### Setup (one time)
+
+1. Install sqlx CLI if you don't have it:
+
+```bash
+cargo install sqlx-cli --no-default-features --features sqlite
+```
+
+2. Initialize the local database from the repo root (creates `suttabot.db` with all schema migrations applied):
+
+```bash
+DATABASE_URL="sqlite:./suttabot.db" sqlx database create
+DATABASE_URL="sqlite:./suttabot.db" sqlx migrate run --source db/migrations
+```
+
+#### Running
+
+1. Set the required environment variables:
+
+```bash
+export TELOXIDE_TOKEN="<your_bot_token>"
+export DATABASE_URL="sqlite:./suttabot.db"
+export DATA_DIR="./data/ru"
+```
+
 2. Run the project: `cargo run`
 
 ### With Docker
@@ -68,14 +92,14 @@ On every push to `main`, `release-plz` opens or updates a release PR that accumu
 
 ## Announcements (What's New)
 
-User-facing "what's new" entries are separate from technical releases. Add a file to `news/` when there is something users would care about (new command, new content source, etc.). Technical releases (refactors, CI changes, deps) do not need an entry.
+User-facing "what's new" entries are separate from technical releases. Add a file to `data/ru/news/` when there is something users would care about (new command, new content source, etc.). Technical releases (refactors, CI changes, deps) do not need an entry.
 
-**Naming convention:** `news/<YYYY-MM-DD>-<slug>.md`
+**Naming convention:** `data/ru/news/<YYYY-MM-DD>-<slug>.md`
 - `<slug>` must be kebab-case (`[a-z0-9]+(-[a-z0-9]+)*`), e.g. `random-command`, `an-collection-added`
-- Slugs must be unique across the `news/` directory
+- Slugs must be unique across the `data/ru/news/` directory
 
 **Workflow:**
-1. Write the entry in `news/` in plain Russian markdown (no header — the bot adds one automatically)
+1. Write the entry in `data/ru/news/` in plain Russian markdown (no header — the bot adds one automatically)
 2. Commit, open PR, merge
 3. Deploy (the Docker build triggers automatically on merge to main)
 4. Run `/announce` from an admin account in Telegram — broadcasts to all opted-in subscribers

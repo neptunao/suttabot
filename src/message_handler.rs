@@ -637,7 +637,7 @@ async fn handle_announce_command(
             None => {
                 bot.send_message(
                     msg.chat.id,
-                    tg_escape("Нет новостных записей в директории news/."),
+                    tg_escape(&format!("Нет новостных записей в директории {}.", crate::helpers::news_dir().display())),
                 )
                 .parse_mode(ParseMode::MarkdownV2)
                 .await?;
