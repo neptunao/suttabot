@@ -2,6 +2,7 @@
 changelog_update = true
 git_release_enable = true
 publish = false
+semver_update = false
 
 [changelog]
 header = """# Changelog
