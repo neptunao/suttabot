@@ -6,7 +6,7 @@ rust-version = "1.95"
 
 [dependencies]
 teloxide = { version = "0.12.2", features = ["macros", "auto-send"] }
-log = "0.4.29"
+log = "0.4.32"
 pretty_env_logger = "0.5.0"
 tokio = { version =  "1.52.3", features = ["rt-multi-thread", "macros"] }
 anyhow = "1.0.100"
