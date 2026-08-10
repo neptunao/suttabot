@@ -162,6 +162,16 @@ python bilara2md.py <source_folder> <format_folder> <target_folder>
 | `--filename-format` | `full` keeps source stem `mn1_translation-ru-sv.md` (default); `numerical` uses just `mn1.md` |
 | `--overwrite` | Delete the alternative-format file for the same sutta if present, and overwrite the file if it already exists. Without this flag, existing files are skipped. (default: off) |
 
+### sync_suttas.py
+
+To sync any Bilara translation subtree directly into `data/ru/`, use the
+one-argument wrapper. It overwrites published suttas with full filenames and
+removes their old numerical filenames:
+
+```bash
+python scripts/sync_suttas.py /path/to/bilara-data/translation/ru/sv/sutta/an/an3
+```
+
 ### suttacentral2md.py
 
 Converts HTML files downloaded from SuttaCentral to Markdown.

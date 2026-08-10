@@ -290,13 +290,13 @@ def transform_all_in_folder(
         if not overwrite and os.path.exists(target_path):
             continue
 
-        if overwrite:
-            delete_alternative(target_folder, source_file, sutta_name, filename_format)
-
         markdown = transform_sutta(source_path, format_path)
 
         with open(target_path, "w") as f:
             f.write(markdown)
+
+        if overwrite:
+            delete_alternative(target_folder, source_file, sutta_name, filename_format)
 
 
 def transform_all_recursive(
@@ -331,13 +331,13 @@ def transform_all_recursive(
             if not overwrite and os.path.exists(target_path):
                 continue
 
-            if overwrite:
-                delete_alternative(target_folder, source_file, sutta_name, filename_format)
-
             markdown = transform_sutta(source_path, format_path)
 
             with open(target_path, "w") as f:
                 f.write(markdown)
+
+            if overwrite:
+                delete_alternative(target_folder, source_file, sutta_name, filename_format)
 
 
 def main():
