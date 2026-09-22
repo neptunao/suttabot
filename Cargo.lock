@@ -2871,9 +2871,9 @@ dependencies = [
 
 [[package]]
 name = "solunatus"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df58ad62cc037eed236ea25b70dfed2b6b8b137de773e1e43a9a44246cb967c6"
+checksum = "435468e4db459ab5c3cc2ca0ea6f23d09dc82120a688e67cafc092a9da4f31a8"
 dependencies = [
  "anyhow",
  "chrono",
